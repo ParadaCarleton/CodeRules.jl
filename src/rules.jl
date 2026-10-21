@@ -1,0 +1,918 @@
+# Code rules checked on a loaded module and on its repository's Julia source: lowered code,
+# bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
+
+"""Definitions, not state: a `DataType` is itself `ismutable`."""
+is_definition(value::Any)::Bool = value isa Union{Type, Function, Module}
+
+"""
+    is_hidden_input(binding)
+
+Whether reading the global `binding` reads something besides an immutable constant:
+a non-constant binding, a mutable value (a `Ref`, `Dict`, cache, `Array`, `Atomic`),
+or a `ScopedValue`, whose value depends on the caller's scope rather than the
+arguments. Strings and symbols are immutable in use.
+"""
+function is_hidden_input(binding::GlobalRef)::Bool
+    if !isdefined(binding.mod, binding.name)
+        return false
+    end
+    value = getfield(binding.mod, binding.name)
+    if is_definition(value) || value isa Union{AbstractString, Symbol}
+        return false
+    end
+    return !isconst(binding.mod, binding.name) || ismutable(value) || value isa Base.ScopedValues.ScopedValue
+end
+
+"""Every global `node`, a lowered statement, reads."""
+global_reads(node::GlobalRef)::Vector{GlobalRef} = [node]
+global_reads(node::Expr)::Vector{GlobalRef} = GlobalRef[read for argument in node.args for read in global_reads(argument)]
+global_reads(node::Any)::Vector{GlobalRef} = GlobalRef[]
+
+"""
+    is_closure_type(value)
+
+Whether binding `value` is a lowered anonymous function, `do` block or inner function
+(its type name starts with `#`).
+"""
+function is_closure_type(value::Any)::Bool
+    if !(value isa Type)
+        return false
+    end
+    unwrapped = Base.unwrap_unionall(value)
+    return unwrapped isa DataType && unwrapped <: Function && startswith(string(unwrapped.name.name), "#")
+end
+
+"""
+    defined_methods(mod)
+
+The methods `mod` defines on its own functions and types, closures included: each
+function's methods, and each type's constructors and call methods.
+
+ponytail: methods `mod` adds to another module's function (`Base.show`, AD rules) are
+missed; `Base.visit` over the method table finds those but misses closure call methods
+on Julia 1.13 and needs a mutating callback.
+"""
+function defined_methods(mod::Module)::Vector{Method}
+    values = [getfield(mod, name) for name in names(mod; all = true) if isdefined(mod, name)]
+    world = Base.get_world_counter()
+    function_methods = Method[method for value in values if value isa Function for method in methods(value)]
+    call_methods = Method[
+        match.method for value in values if value isa Type && Base.unwrap_unionall(value) isa DataType
+            for match in Base._methods_by_ftype(Tuple{Base.unwrap_unionall(value), Vararg{Any}}, -1, world)
+    ]
+    constructors = Method[method for value in values if value isa Type for method in methods(value)]
+    return unique(method for method in vcat(function_methods, call_methods, constructors) if method.module === mod)
+end
+
+"""The name of the type whose instances `method` is called on (its function's type), or `nothing`."""
+function callee_name(method::Method)::Union{Core.TypeName, Nothing}
+    callee = Base.unwrap_unionall(method.sig).parameters[1]
+    if callee isa TypeVar
+        callee = callee.ub
+    end
+    callee = Base.unwrap_unionall(callee)
+    if callee isa DataType
+        return callee.name
+    end
+    return nothing
+end
+
+"""The closure types of `mod` that lowered statements `code` name, by type name."""
+named_closures(code::Core.CodeInfo, mod::Module)::Vector{Core.TypeName} = Core.TypeName[
+    Base.unwrap_unionall(called_type(getfield(mod, read.name))).name
+        for statement in code.code for read in global_reads(statement)
+        if read.mod === mod && isdefined(mod, read.name) && is_unnamed_function_type(called_type(getfield(mod, read.name)))
+]
+
+"""The type a lowered statement names through binding `value`: the type itself, or a function instance's type (a keyword body)."""
+called_type(value::Type)::Type = value
+called_type(value::Any)::Type = typeof(value)
+
+"""
+Whether binding `value` is the type of a closure, `do` block, inner or anonymous function: an
+`is_closure_type` that is not the type of a function named in source. Julia 1.12 binds a named
+function's type too (`#add_slope!` beside `add_slope!`), and code reaches that function
+through its name, not its type.
+"""
+function is_unnamed_function_type(value::Any)::Bool
+    if !is_closure_type(value)
+        return false
+    end
+    type = Base.unwrap_unionall(value)
+    return !(isdefined(type, :instance) && !startswith(string(nameof(type.instance)), "#"))
+end
+
+"""The names of every `is_unnamed_function_type` bound in `mod`, live or left over."""
+closure_type_names(mod::Module)::Set{Core.TypeName} = Set{Core.TypeName}(
+    Base.unwrap_unionall(getfield(mod, name)).name
+        for name in names(mod; all = true) if isdefined(mod, name) && is_unnamed_function_type(getfield(mod, name))
+)
+
+"""
+    live_closures(mod, methods)
+
+The closure types (by name) that the current code of `methods` can create: those the lowered code
+of a method that is not itself a closure names, and those a live closure's own code names. A
+closure whose defining method was redefined in this process (by Revise, in a worker reused across
+trees) is a leftover type that no current code reaches, and is not the source's.
+"""
+function live_closures(mod::Module, methods::AbstractVector{Method})::Set{Core.TypeName}
+    closure_names = closure_type_names(mod)
+    closure_methods = Dict{Core.TypeName, Vector{Method}}()
+    # A worklist of reached names: its length is the number of reachable closures, unknown up front.
+    pending = Core.TypeName[]
+    for method in methods
+        name = callee_name(method)
+        code = lowered(method)
+        if name in closure_names
+            push!(get!(closure_methods, name, Method[]), method)
+        elseif code isa Core.CodeInfo
+            append!(pending, named_closures(code, mod))
+        end
+    end
+    live = Set{Core.TypeName}()
+    while !isempty(pending)
+        name = pop!(pending)
+        if name in live
+            continue
+        end
+        push!(live, name)
+        for method in get(closure_methods, name, Method[])
+            code = lowered(method)
+            if code isa Core.CodeInfo
+                append!(pending, named_closures(code, mod))
+            end
+        end
+    end
+    return live
+end
+
+"""
+    module_methods(mod)
+
+The `defined_methods` of `mod` that its current code reaches: every method except a closure's that
+is not `live_closures`.
+"""
+function module_methods(mod::Module)::Vector{Method}
+    methods = defined_methods(mod)
+    live = live_closures(mod, methods)
+    closure_names = closure_type_names(mod)
+    return [method for method in methods if !(callee_name(method) in closure_names) || callee_name(method) in live]
+end
+
+"""Lowered code of `method`, or `nothing` for a generated or builtin method."""
+function lowered(method::Method)::Union{Core.CodeInfo, Nothing}
+    if !isdefined(method, :source)
+        return nothing
+    end
+    return Base.uncompressed_ir(method)
+end
+
+"""
+    statement_line(code, method, index)
+
+The line of `method`'s source that lowered statement `index` of `code` comes from: the line of the
+method itself for a statement from another file (a macro's).
+"""
+function statement_line(code::Core.CodeInfo, method::Method, index::Integer)::Int
+    for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index)
+        if node.file === method.file
+            return node.line
+        end
+    end
+    return method.line
+end
+
+"""
+    hidden_inputs(mod)
+
+Each read of a global that some method of `mod` takes besides its arguments and immutable
+constants, keyed by the global and placed at the statement that reads it.
+"""
+function hidden_inputs(mod::Module)::Vector{Site}
+    return [
+        Site(string(read.name), string(method.file), statement_line(code, method, index))
+            for method in module_methods(mod) for code in (lowered(method),) if code isa Core.CodeInfo
+            for (index, statement) in pairs(code.code) for read in global_reads(statement) if is_hidden_input(read)
+    ]
+end
+
+"""
+A method of the package with its unoptimized typed code and the return type inference found for it
+(widened to a plain type, so a constant result `nothing` reads as `Nothing`).
+"""
+struct Inferred
+    method::Method
+    code::Core.CodeInfo
+    result::Type
+end
+
+"""
+Each method of `mod` (`module_methods`), typed over its own signature. Inference returns a method
+and its declared type, with no code, for one it cannot type (a generated method); that has no locals
+to report and is left out.
+"""
+function inferred_methods(mod::Module)::Vector{Inferred}
+    return [
+        Inferred(method, code, Core.Compiler.widenconst(result))
+            for method in module_methods(mod) for (code, result) in Base.code_typed_by_type(method.sig; optimize = false)
+            if code isa Core.CodeInfo && code.parent isa Core.MethodInstance && code.parent.def === method
+    ]
+end
+
+"""
+Whether inferred type `inferred` leaves the compiler without a concrete layout: abstract, a `Union`
+of more than `UNION_SPLIT_LIMIT` types or of any abstract one, or a collection or tuple that holds such
+elements (`Vector{Any}`). `Type{X}` is a value; a local never assigned (`Union{}`) holds nothing.
+"""
+function abstract_local_type(inferred::Any)::Bool
+    type = Core.Compiler.widenconst(inferred)
+    if type === Union{}
+        return false
+    elseif type isa Union
+        members = Base.uniontypes(type)
+        return length(members) > UNION_SPLIT_LIMIT || any(abstract_local_type, members)
+    elseif type isa DataType && type.name === Base.unwrap_unionall(Type).name
+        return false
+    elseif !isconcretetype(type)
+        return true
+    elseif type <: AbstractArray
+        return abstract_local_type(eltype(type))
+    elseif type <: AbstractDict
+        return abstract_local_type(keytype(type)) || abstract_local_type(valtype(type))
+    elseif type <: Tuple
+        return any(abstract_local_type, fieldtypes(type))
+    end
+    return false
+end
+
+# A `Union` of at most this many concrete types is split at each use, as `Union{Nothing, X}` is.
+const UNION_SPLIT_LIMIT = 4
+
+"""
+The first lowered statement of `inferred` that assigns slot `index`: where the variable is introduced,
+placed on its source line (the method's own line when no statement assigns it).
+"""
+function slot_line(inferred::Inferred, index::Integer)::Int
+    for (position, statement) in pairs(inferred.code.code)
+        if statement isa Expr && statement.head === :(=) && statement.args[1] === Core.SlotNumber(index)
+            return statement_line(inferred.code, inferred.method, position)
+        end
+    end
+    return inferred.method.line
+end
+
+"""The key an offender of a method goes under: its file and name, the file alone for a closure (whose name carries compiler counters)."""
+function method_key(method::Method)::String
+    name = string(method.name)
+    return startswith(name, "#") ? "$(basename(string(method.file))) closure" : "$(basename(string(method.file))) $name"
+end
+
+"""
+Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
+`abstract_local_type`, one site per variable. A method a macro generated in another package's file
+(`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables.
+"""
+function abstract_locals(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
+    return [
+        Site(method_key(item.method), string(item.method.file), slot_line(item, index))
+            for item in inferred if startswith(string(item.method.file), repository.root)
+            for (index, (name, type)) in enumerate(zip(item.code.slotnames, item.code.slottypes))
+            if index > item.method.nargs && !isempty(string(name)) && !startswith(string(name), "#") && abstract_local_type(type)
+    ]
+end
+
+"""
+Whether `item` is a named function of `repository`, not a closure or another package's function
+(`Base.show`, a keyword call), that inference types as always returning `nothing` yet whose name
+does not end in `!`: it exists for its effect, so its name says so.
+"""
+function is_unmarked_effect(repository::Repository, item::Inferred)::Bool
+    function_type = Base.unwrap_unionall(item.method.sig).parameters[1]
+    name = string(item.method.name)
+    return item.result === Nothing && !startswith(name, "#") && !endswith(name, "!") &&
+        function_type isa DataType && function_type <: Function && function_type.name.module === item.method.module &&
+        startswith(string(item.method.file), repository.root)
+end
+
+"""Each method of `is_unmarked_effect`, one site at its signature."""
+unmarked_effects(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site} =
+    [Site(method_key(item.method), string(item.method.file), item.method.line) for item in inferred if is_unmarked_effect(repository, item)]
+
+"""
+    closure_site(type, world)
+
+The site of closure type `type`: its call method's file and line, keyed by the file because closure
+type names carry compiler counters. A closure with no call method, or a macro-generated one with no
+source file, is keyed "none" and cannot be opted out.
+"""
+function closure_site(type::Type, world::Integer)::Site
+    matches = Base._methods_by_ftype(Tuple{Base.unwrap_unionall(type), Vararg{Any}}, -1, world)
+    if isempty(matches)
+        return Site("none", "", 0)
+    end
+    method = first(matches).method
+    return Site(basename(string(method.file)), string(method.file), method.line)
+end
+
+"""The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
+function live_closure_types(mod::Module)::Vector{DataType}
+    live = live_closures(mod, defined_methods(mod))
+    return DataType[
+        Base.unwrap_unionall(getfield(mod, name)) for name in names(mod; all = true)
+            if isdefined(mod, name) && is_closure_type(getfield(mod, name)) && Base.unwrap_unionall(getfield(mod, name)).name in live
+    ]
+end
+
+"""Each `live_closure_types` closure of `mod` that captures data (a closure type with fields), as a `closure_site`."""
+function capturing_closures(mod::Module)::Vector{Site}
+    world = Base.get_world_counter()
+    return [closure_site(type, world) for type in live_closure_types(mod) if fieldcount(type) > 0]
+end
+
+"""
+Each `live_closure_types` closure of `mod` holding a `Core.Box`: a captured variable that the
+closure or its definer rebinds, so every read of it is dynamically typed and the two scopes share it.
+The closure ratchet counts capturing closures per file against a baseline, so a counted closure that
+gains a Box goes unseen there; a Box is never tolerated.
+"""
+function boxed_closures(mod::Module)::Vector{Site}
+    world = Base.get_world_counter()
+    return [closure_site(type, world) for type in live_closure_types(mod) if Core.Box in fieldtypes(type)]
+end
+
+"""Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
+module_structs(mod::Module)::Vector{DataType} = unique(
+    DataType[
+        Base.unwrap_unionall(getfield(mod, name)) for name in names(mod; all = true)
+            if isdefined(mod, name) && getfield(mod, name) isa Type && !is_closure_type(getfield(mod, name)) &&
+            Base.unwrap_unionall(getfield(mod, name)) isa DataType &&
+            isstructtype(Base.unwrap_unionall(getfield(mod, name))) &&
+            parentmodule(Base.unwrap_unionall(getfield(mod, name))) === mod
+    ]
+)
+
+"""
+Fields of `type` declared with an abstract type (not a type parameter, not a `Union`), or
+with a concrete container of one: `Vector{Any}`, `Base.RefValue{Any}` and
+`Dict{Tuple, Any}` are concrete, but every read from them is dynamically dispatched.
+"""
+abstract_fields(type::DataType)::Vector{Symbol} = [
+    name for (name, declared) in zip(fieldnames(type), fieldtypes(type))
+        if !(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared)
+]
+
+"""
+Whether `declared` is abstract or has an abstract type among its parameters, at any depth.
+Allowed: `Union`s (small, split by the compiler), `Type{T}`, a struct's own type parameters
+(`Vector{E}` with `E` free), and value parameters (`SVector{16, E}`'s `Tuple{16}`).
+"""
+function holds_abstract(declared::Type)::Bool
+    plain = Base.unwrap_unionall(declared)
+    abstract_itself = if Base.has_free_typevars(declared) || plain <: Tuple
+        plain isa DataType && isabstracttype(plain)
+    else
+        !isconcretetype(declared)
+    end
+    return abstract_itself || any(abstract_parameter, plain.parameters)
+end
+
+abstract_parameter(parameter::Any)::Bool =
+    parameter isa UnionAll ||
+    (parameter isa DataType && !(parameter <: Type) && holds_abstract(parameter))
+
+"""First word of a name in snake case: `SolverControls` and `solver_tolerance` both give `"solver"`."""
+first_word(name::Symbol)::String =
+    lowercase(first(split(replace(string(name), r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])" => "_"), '_')))
+
+"""
+    repeated_prefix(type)
+
+The word that the field names of `type` repeat instead of saying it once in the type:
+the type's own first word starting any field (`SolverControls.solver_tolerance`), or one
+first word shared by more than half of at least three fields (`continuation_step`,
+`continuation_theta`, ...: those fields belong in a `ContinuationControls`). `nothing`
+when no word repeats.
+"""
+function repeated_prefix(type::DataType)::Union{String, Nothing}
+    words = [first_word(name) for name in fieldnames(type) if occursin('_', string(name))]
+    own = first_word(nameof(type))
+    if own in words
+        return own
+    end
+    shared = [word for word in unique(words) if count(==(word), words) * 2 > fieldcount(type)]
+    if fieldcount(type) >= 3 && !isempty(shared)
+        return only(shared)
+    end
+    return nothing
+end
+
+"""The name a parsed function definition `node` defines, or `nothing` when `node` defines none."""
+function defined_name(node::Expr)::Union{Symbol, Nothing}
+    if !(node.head in (:function, :(=))) || isempty(node.args)
+        return nothing
+    end
+    signature = node.args[1]
+    while signature isa Expr && signature.head in (:where, :(::))
+        signature = signature.args[1]
+    end
+    if signature isa Expr && signature.head === :call
+        return Symbol(string(signature.args[1]))
+    end
+    return nothing
+end
+
+"""The declared return type of parsed function definition `node`, or `nothing` when it declares none."""
+function return_annotation(node::Expr)::Any
+    signature = node.args[1]
+    while signature isa Expr && signature.head === :where
+        signature = signature.args[1]
+    end
+    if signature isa Expr && signature.head === :(::) && length(signature.args) == 2
+        return signature.args[2]
+    end
+    return nothing
+end
+
+"""Whether parsed type expression `annotation` is a `Union` with `Nothing` among its members."""
+mentions_nothing(annotation::Expr)::Bool =
+    annotation.head === :curly && first(annotation.args) === :Union && :Nothing in annotation.args[2:end]
+mentions_nothing(::Any)::Bool = false
+
+# The edge of `exp`'s Float32 and Float64 ranges, written as a literal guard.
+const EXP_RANGE_LITERALS = (88, 709)
+
+"""
+Whether parsed source `node` itself is an overflow or underflow guard: a call to `floatmin` or
+`floatmax`, a literal at the edge of `exp`'s range, or `isfinite` of an expression calling `exp`.
+"""
+is_range_guard(node::Real)::Bool = node in EXP_RANGE_LITERALS
+is_range_guard(node::Expr)::Bool =
+    node.head === :call && (
+        first(node.args) in (:floatmin, :floatmax) ||
+            (first(node.args) === :isfinite && any(calls_exp, node.args[2:end]))
+    )
+is_range_guard(::Any)::Bool = false
+
+calls_exp(node::Expr)::Bool = (node.head === :call && first(node.args) === :exp) || any(calls_exp, node.args)
+calls_exp(::Any)::Bool = false
+
+"""Parsed source `node` with its line numbers dropped, so two copies of one statement compare equal."""
+without_lines(node::Expr)::Expr = Expr(node.head, (without_lines(argument) for argument in node.args if !(argument isa LineNumberNode))...)
+without_lines(node::Any)::Any = node
+
+"""
+One expression of parsed source: `line` is the nearest line marker before it, `enclosing` the
+function definition it sits in (`<top level>` outside any) and `enclosing_line` that definition's line.
+"""
+struct Located
+    node::Expr
+    line::Int
+    enclosing::Symbol
+    enclosing_line::Int
+end
+
+"""The line a function definition `node` starts on: its body's first line marker, which `Meta.parseall` sets to the `function` line even after a docstring."""
+function definition_line(node::Expr, line::Int)::Int
+    if length(node.args) >= 2 && node.args[2] isa Expr && node.args[2].head === :block &&
+            !isempty(node.args[2].args) && first(node.args[2].args) isa LineNumberNode
+        return first(node.args[2].args).line
+    end
+    return line
+end
+
+"""The lines of function definition `node`'s signature: from `definition_line` to the line before its body's first statement (one line for `f(x) = …`)."""
+function definition_lines(node::Expr, line::Int)::UnitRange{Int}
+    first_line = definition_line(node, line)
+    body = length(node.args) >= 2 ? node.args[2] : nothing
+    if body isa Expr && body.head === :block && length(body.args) >= 2 && body.args[2] isa LineNumberNode
+        return first_line:max(first_line, body.args[2].line - 1)
+    end
+    return first_line:first_line
+end
+
+"""The name of the `@testset` that parsed expression `node` opens, or `nothing` when `node` opens none or the name is interpolated."""
+function testset_name(node::Expr)::Union{Symbol, Nothing}
+    if node.head === :macrocall && first(node.args) === Symbol("@testset")
+        for argument in node.args
+            if argument isa String
+                return Symbol(argument)
+            end
+        end
+    end
+    return nothing
+end
+
+"""Every expression below parsed source `node`, each as a `Located`; returns the line the walk ended on."""
+function locate!(found::Vector{Located}, node::Expr, line::Int, enclosing::Symbol, enclosing_line::Int)::Int
+    name = defined_name(node)
+    inside = something(name, testset_name(node), enclosing)
+    inside_line = if !isnothing(name)
+        definition_line(node, line)
+    elseif !isnothing(testset_name(node))
+        line
+    else
+        enclosing_line
+    end
+    push!(found, Located(node, line, inside, inside_line))
+    for argument in node.args
+        if argument isa LineNumberNode
+            line = argument.line
+        elseif argument isa Expr
+            line = locate!(found, argument, line, inside, inside_line)
+        end
+    end
+    return line
+end
+
+"""Every expression of the parsed file `path`, as `Located`s."""
+function located_source(path::AbstractString)::Vector{Located}
+    found = Located[]
+    locate!(found, Meta.parseall(read(path, String)), 0, Symbol("<top level>"), 0)
+    return found
+end
+
+"""Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
+function nothing_returns(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    return [
+        Site(string(defined_name(item.node)), path, first(definition_lines(item.node, item.line)), last(definition_lines(item.node, item.line)))
+            for item in located if !isnothing(defined_name(item.node)) && mentions_nothing(return_annotation(item.node))
+    ]
+end
+
+"""Overflow and underflow guards, keyed by the function they sit in."""
+function range_guards(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    sites = Site[]
+    for item in located
+        if is_range_guard(item.node)
+            push!(sites, Site(string(item.enclosing), path, item.line))
+        end
+        for argument in item.node.args
+            if argument isa Real && is_range_guard(argument)
+                push!(sites, Site(string(item.enclosing), path, item.line))
+            end
+        end
+    end
+    return sites
+end
+
+"""Statements that repeat an earlier statement of the same block, keyed `definition: statement`. A statement pasted twice runs twice; the same line in two branches is in two blocks and passes."""
+function repeated_statements(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    sites = Site[]
+    for item in located
+        if item.node.head !== :block
+            continue
+        end
+        seen = Expr[]
+        line = item.line
+        for argument in item.node.args
+            if argument isa LineNumberNode
+                line = argument.line
+            elseif argument isa Expr
+                statement = without_lines(argument)
+                if statement in seen
+                    push!(sites, Site("$(item.enclosing): $statement", path, line))
+                end
+                push!(seen, statement)
+            end
+        end
+    end
+    return sites
+end
+
+"""Calls of `Core.Compiler.return_type`, a guess at a result type, keyed by file."""
+function return_type_calls(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    return [
+        Site(basename(path), path, item.line) for item in located
+            if item.node.head === :. && length(item.node.args) == 2 && item.node.args[2] == QuoteNode(:return_type)
+    ]
+end
+
+"""The name a parsed `struct` definition `node` declares, whatever its parameters and supertype."""
+function struct_name(node::Expr)::Symbol
+    header = node.args[2]
+    while header isa Expr && header.head in (:<:, :curly)
+        header = first(header.args)
+    end
+    return Symbol(string(header))
+end
+
+"""Where each struct of the parsed source `files` is declared: its name with the file and line of its `struct`."""
+function struct_locations(files::AbstractVector{<:AbstractString})::Dict{Symbol, Tuple{String, Int}}
+    locations = Dict{Symbol, Tuple{String, Int}}()
+    for file in files
+        for item in located_source(file)
+            if item.node.head === :struct
+                locations[struct_name(item.node)] = (file, item.line)
+            end
+        end
+    end
+    return locations
+end
+
+const CONCRETE_CONTAINERS = (:Vector, :Matrix, :Array, :Dict)
+const RESIZERS = (:push!, :pushfirst!, :append!, :prepend!, :resize!, :empty!, :pop!, :popfirst!, :deleteat!, :insert!, :splice!, :sizehint!, :union!, :setdiff!)
+
+"""Whether parsed type expression `annotation` is a concrete container (`Vector`, `Matrix`, `Array`, `Dict`, bare or with parameters), alone or as a direct member of a `Union`."""
+is_concrete_container(annotation::Symbol)::Bool = annotation in CONCRETE_CONTAINERS
+function is_concrete_container(annotation::Expr)::Bool
+    if annotation.head !== :curly
+        return false
+    end
+    if first(annotation.args) === :Union
+        return any(is_concrete_container, annotation.args[2:end])
+    end
+    return first(annotation.args) in CONCRETE_CONTAINERS
+end
+is_concrete_container(::Any)::Bool = false
+
+"""Whether parsed `node` resizes the variable `name`: a call of `push!`, `empty!` or another size-changing function on it."""
+function resizes(node::Expr, name::Symbol)::Bool
+    if node.head === :call && length(node.args) >= 2 && first(node.args) in RESIZERS && node.args[2] === name
+        return true
+    end
+    for argument in node.args
+        if argument isa Expr && resizes(argument, name)
+            return true
+        end
+    end
+    return false
+end
+
+"""The call a parsed function definition `node` declares, whatever return annotation or `where` clause wraps it, or `nothing`."""
+function signature_call(node::Expr)::Union{Expr, Nothing}
+    if !(node.head in (:function, :(=))) || isempty(node.args)
+        return nothing
+    end
+    signature = node.args[1]
+    while signature isa Expr && signature.head in (:where, :(::))
+        signature = signature.args[1]
+    end
+    if signature isa Expr && signature.head === :call
+        return signature
+    end
+    return nothing
+end
+
+"""Each annotated argument below parsed `argument`, as its name (`:_` when unnamed) and annotation, positional or keyword."""
+function annotated_arguments(argument::Expr)::Vector{Tuple{Symbol, Any}}
+    found = Tuple{Symbol, Any}[]
+    if argument.head === :(::)
+        name = length(argument.args) == 2 ? argument.args[1] : :_
+        push!(found, (name isa Symbol ? name : :_, last(argument.args)))
+    elseif argument.head in (:kw, :parameters, :...)
+        for inner in (argument.head === :kw ? argument.args[1:1] : argument.args)
+            if inner isa Expr
+                append!(found, annotated_arguments(inner))
+            end
+        end
+    end
+    return found
+end
+annotated_arguments(::Any)::Vector{Tuple{Symbol, Any}} = Tuple{Symbol, Any}[]
+
+"""
+Arguments annotated with a concrete container (`is_concrete_container`) that the method does not
+resize, one site per argument at the method's signature, keyed by file: `AbstractVector{T}` takes a
+view, an `OffsetArray` or a GPU array, a `Vector{T}` takes none of them.
+"""
+function concrete_arguments(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    sites = Site[]
+    for item in located
+        call = signature_call(item.node)
+        if isnothing(call) || length(item.node.args) < 2
+            continue
+        end
+        span = definition_lines(item.node, item.line)
+        body = item.node.args[2]
+        for argument in call.args[2:end]
+            for (name, annotation) in annotated_arguments(argument)
+                if is_concrete_container(annotation) && !(body isa Expr && resizes(body, name))
+                    push!(sites, Site(basename(path), path, first(span), last(span)))
+                end
+            end
+        end
+    end
+    return sites
+end
+
+# Result types that need no generic form: nothing, and the tuple types, whose element types name the
+# result's own parts.
+const EXEMPT_RESULT_TYPES = (:Nothing, :NamedTuple, :Tuple, :NTuple)
+
+"""
+Whether parsed type expression `annotation` names a concrete type of `scope` or of Base (`Bool`,
+`Float32`, `Vector{E}`, a package struct), alone or as a member of a `Union`. A result type must be
+generic (`typeof(x)`, a type variable, `AbstractVector{E}`), so a fixed concrete type is named here,
+except `Nothing`, tuples and `NamedTuple`s (`EXEMPT_RESULT_TYPES`) and enum types. A type variable,
+`typeof(x)` and an abstract type name none.
+"""
+function names_concrete_type(annotation::Symbol, scope::Module)::Bool
+    if annotation in EXEMPT_RESULT_TYPES
+        return false
+    end
+    for source in (scope, Base)
+        if isdefined(source, annotation)
+            named = getglobal(source, annotation)
+            return named isa Type && !(named <: Enum) && Base.unwrap_unionall(named) isa DataType && !isabstracttype(named)
+        end
+    end
+    return false
+end
+function names_concrete_type(annotation::Expr, scope::Module)::Bool
+    if annotation.head !== :curly
+        return false
+    end
+    if first(annotation.args) === :Union
+        for member in annotation.args[2:end]
+            if names_concrete_type(member, scope)
+                return true
+            end
+        end
+        return false
+    end
+    return names_concrete_type(first(annotation.args), scope)
+end
+names_concrete_type(::Any, ::Module)::Bool = false
+
+"""The type name at the head of parsed type expression `annotation` (`Foo` of `Foo{T}`), or `nothing`."""
+type_head(annotation::Symbol)::Symbol = annotation
+function type_head(annotation::Expr)::Union{Symbol, Nothing}
+    if annotation.head === :curly
+        return type_head(first(annotation.args))
+    end
+    return nothing
+end
+type_head(::Any)::Nothing = nothing
+
+"""Whether method definition `node` is a constructor: it is named for the type its return annotation names, `Foo(…)::Foo` or `Foo{T}(…)::Foo{T}`."""
+function constructs_own_type(node::Expr)::Bool
+    call = signature_call(node)
+    if isnothing(call)
+        return false
+    end
+    returned = type_head(return_annotation(node))
+    return !isnothing(returned) && type_head(first(call.args)) === returned
+end
+
+"""
+Methods whose declared return type names a concrete type (`names_concrete_type`), one site per
+method at its signature, keyed by file and function name: a result type must be generic, annotated by
+what the arguments bind, not by a fixed type. A constructor returning its own struct (`constructs_own_type`) is exempt.
+"""
+function concrete_returns(path::AbstractString, located::AbstractVector{Located}, scope::Module)::Vector{Site}
+    return [
+        Site("$(basename(path)) $(defined_name(item.node))", path, first(definition_lines(item.node, item.line)), last(definition_lines(item.node, item.line)))
+            for item in located
+            if !isnothing(signature_call(item.node)) && length(item.node.args) >= 2 && names_concrete_type(return_annotation(item.node), scope) && !constructs_own_type(item.node)
+    ]
+end
+
+const SYNTAX = Base.JuliaSyntax
+const FLOAT_KIND = SYNTAX.@K_str "Float"
+const IDENTIFIER_KIND = SYNTAX.@K_str "Identifier"
+const MACROCALL_KIND = SYNTAX.@K_str "macrocall"
+const FIELD_KIND = SYNTAX.@K_str "."
+const QUOTE_KIND = SYNTAX.@K_str "quote"
+# Names that mean Float64: the type, its complex partner, and the Float64 constants.
+const FLOAT64_NAMES = (:Float64, :ComplexF64, :Inf, :NaN, :Inf64, :NaN64)
+
+"""
+Float64 tokens below syntax `node`, one site each at the token's own line, keyed by file: an untyped
+float literal, `Float64`, `ComplexF64`, or the constants `Inf` and `NaN` (also `Inf64`, `NaN64`).
+A field name (`Base.Inf`), a quoted symbol and an `@changeprecision` body, which parses at its own
+precision, are skipped.
+"""
+function float64_sites!(sites::AbstractVector{Site}, path::AbstractString, node::SYNTAX.SyntaxNode)::Nothing
+    kind = SYNTAX.kind(node)
+    if SYNTAX.is_leaf(node)
+        if kind === FLOAT_KIND || (kind === IDENTIFIER_KIND && Symbol(SYNTAX.sourcetext(node)) in FLOAT64_NAMES)
+            push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node))))
+        end
+        return nothing
+    end
+    children = SYNTAX.children(node)
+    if kind === QUOTE_KIND || (kind === MACROCALL_KIND && SYNTAX.sourcetext(first(children)) == "@changeprecision")
+        return nothing
+    end
+    for child in (kind === FIELD_KIND ? children[1:1] : children)
+        float64_sites!(sites, path, child)
+    end
+    return nothing
+end
+
+"""The Float64 sites of the Julia file `path`, by `float64_sites!`."""
+function float64_sites(path::AbstractString)::Vector{Site}
+    sites = Site[]
+    float64_sites!(sites, path, SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path))
+    return sites
+end
+
+"""Whether a parsed argument of a method signature has no `::` annotation (a bare name, alone or with a default or `...`)."""
+untyped_argument(argument::Symbol)::Bool = true
+function untyped_argument(argument::Expr)::Bool
+    if argument.head === :parameters
+        return any(untyped_argument, argument.args)
+    elseif argument.head in (:kw, :...)
+        return untyped_argument(first(argument.args))
+    end
+    return false
+end
+untyped_argument(::Any)::Bool = false
+
+"""
+Whether method definition `node` has an argument with no annotation or declares no return type;
+`false` for anything that is not a method definition.
+"""
+function lacks_annotation(node::Expr)::Bool
+    call = signature_call(node)
+    if isnothing(call) || length(node.args) < 2
+        return false
+    end
+    return any(untyped_argument, call.args[2:end]) || isnothing(return_annotation(node))
+end
+
+"""
+Methods that lack an argument annotation or a return type, one site per method at its
+signature, keyed by file and function name.
+"""
+function missing_annotations(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+    return [
+        Site("$(basename(path)) $(defined_name(item.node))", path, first(definition_lines(item.node, item.line)), last(definition_lines(item.node, item.line)))
+            for item in located if lacks_annotation(item.node)
+    ]
+end
+
+"""Whether `name` is one letter long and not among the names `exempt` allows or `_`, which binds nothing."""
+is_one_letter(name::Symbol, exempt::Tuple{Vararg{Symbol}})::Bool = length(string(name)) == 1 && name !== :_ && !(name in exempt)
+
+"""Each variable name a parsed target binds: an assignment target, a lambda or method parameter list, with its annotations, defaults and splats removed."""
+bound_names(target::Symbol)::Vector{Symbol} = [target]
+function bound_names(target::Expr)::Vector{Symbol}
+    if target.head === :(::) && length(target.args) == 2
+        return bound_names(first(target.args))
+    elseif target.head in (:kw, :...)
+        return bound_names(first(target.args))
+    elseif target.head in (:tuple, :parameters)
+        return reduce(vcat, bound_names.(target.args); init = Symbol[])
+    end
+    return Symbol[]
+end
+bound_names(::Any)::Vector{Symbol} = Symbol[]
+
+"""The one-letter variable names parsed expression `node` itself binds, besides those `exempt` allows: method parameters, an assignment or loop target, a lambda parameter, a `catch` variable."""
+function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Symbol}
+    call = signature_call(node)
+    names = Symbol[]
+    if !isnothing(call)
+        names = reduce(vcat, bound_names.(call.args[2:end]); init = bound_names(first(call.args) isa Symbol ? nothing : first(call.args)))
+    elseif node.head === :(=) || node.head === :->
+        names = bound_names(first(node.args))
+    elseif node.head === :try && length(node.args) >= 3
+        names = bound_names(node.args[2])
+    end
+    return [name for name in names if is_one_letter(name, exempt)]
+end
+
+"""One site per one-letter variable name in the Julia file `path`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
+function one_letter_sites(repository::Repository, path::AbstractString)::Vector{Site}
+    return [
+        Site("$(basename(path)) $(item.enclosing)", path, isnothing(signature_call(item.node)) ? item.line : definition_line(item.node, item.line))
+            for item in located_source(path) for _ in one_letter_names(item.node, repository.one_letter_exempt)
+    ]
+end
+
+# One line of `fatou lint --output concise`: file, line, column, severity, rule and message.
+const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "
+
+"""The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
+present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}} =
+    Tuple(directory for directory in directories if isdir(joinpath(repository.root, directory)))
+
+"""
+One site per finding of `fatou lint` over `directories` of `repository`, keyed by file and Fatou
+rule and placed at the finding's line (the `fatou` rule's opt-out comment takes it out). Fatou must be
+installed; a run that prints a line it did not mean as a finding (a parse error) throws.
+"""
+function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
+    fatou = Sys.which("fatou")
+    if isnothing(fatou)
+        error("fatou is not on PATH; the fatou rule runs `fatou lint`")
+    end
+    command = Cmd(`$fatou lint --color never --output concise $(collect(directories))`; dir = repository.root)
+    printed = IOBuffer()
+    run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
+    lines = split(String(take!(printed)), '\n'; keepempty = false)
+    findings = match.(FATOU_FINDING, lines)
+    unread = lines[isnothing.(findings)]
+    if !isempty(unread)
+        error("fatou lint printed lines that are no finding:\n" * join(unread, "\n"))
+    end
+    return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2])) for found in findings]
+end
+
+"""A `Site` keyed `name` at the declaration of struct `name`."""
+function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site
+    file, line = get(locations, name, ("", 0))
+    return Site(string(name), file, line)
+end
