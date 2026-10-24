@@ -1,5 +1,5 @@
 using Test: @testset, @test
-using CodeRules: Repository, place_imports!, misplaced_imports
+using CodeRules: Repository, place_imports!, misplaced_imports, fix_where_returns, where_return_sites
 
 """The text `place_imports!` leaves in `files` (name => text) written into a fresh tree."""
 function placed(files::AbstractVector{<:Pair})::Dict{String, String}
@@ -31,5 +31,21 @@ end
     @testset "an opted-out import and a bare `using` stay" begin
         kept = "import MKL # fatou-ignore unused-import\nusing Test\n"
         @test placed(["kept.jl" => kept])["kept.jl"] == kept
+    end
+end
+
+@testset "short-form `where` binds the method, not the return annotation" begin
+    @test fix_where_returns("f(x::V{E})::Vector{E} where {E<:Real} = x\n") == "(f(x::V{E})::Vector{E}) where {E<:Real} = x\n"
+    @testset "no argument uses the variable, so the annotation may be deliberate" begin
+        kept = "g()::Vector{T} where {T} = T[]\n"
+        @test fix_where_returns(kept) == kept
+    end
+    @testset "the long form and a method-level `where` are left alone" begin
+        for kept in ("function f(x::V{E})::Vector{E} where {E}\n    x\nend\n", "f(x::V{E}) where {E} = x\n", "(f(x::V{E})::Vector{E}) where {E} = x\n")
+            @test fix_where_returns(kept) == kept
+            path = tempname()
+            write(path, kept)
+            @test isempty(where_return_sites(path))
+        end
     end
 end
