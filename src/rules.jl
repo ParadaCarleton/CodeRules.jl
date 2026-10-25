@@ -252,20 +252,69 @@ struct Inferred
 end
 
 """
-Each method of `mod` (`module_methods`), typed over its own signature. Inference returns a method
-and its declared type, with no code, for one it cannot type (a generated method); that has no locals
-to report and is left out.
+The concrete signatures `method` was compiled for: its specializations, which the code that ran
+(the test suite) called with real argument types. A method with no type variable is typed over its own
+signature; so is a generic one nothing has called, since a type variable stays abstract.
+"""
+function typed_signatures(method::Method)::Vector{Type}
+    called = Type[
+        instance.specTypes
+        for instance in Base.specializations(method)
+        if instance isa Core.MethodInstance && isconcretetype(instance.specTypes)
+    ]
+    if method.sig isa UnionAll && !isempty(called)
+        return called
+    end
+    return Type[method.sig]
+end
+
+"""
+Each method of `mod` (`module_methods`), typed over each of its `typed_signatures`. Inference returns a
+method and its declared type, with no code, for one it cannot type (a generated method); that has no
+locals to report and is left out.
 """
 function inferred_methods(mod::Module)::Vector{Inferred}
     return [
         Inferred(method, code, Core.Compiler.widenconst(result))
         for method in module_methods(mod)
-        for (code, result) in Base.code_typed_by_type(method.sig; optimize = false)
+        for signature in typed_signatures(method)
+        for (code, result) in Base.code_typed_by_type(signature; optimize = false)
         if code isa Core.CodeInfo &&
             code.parent isa Core.MethodInstance &&
             code.parent.def === method
     ]
 end
+
+"""The slots of `code` that a `catch` binds, which Julia always types `Any`."""
+function caught_slots(code::Core.CodeInfo)::Set{Int}
+    caught = Set{Int}()
+    exceptions = Set{Int}(
+        index
+        for (index, statement) in enumerate(code.code)
+        if statement isa Expr && statement.head === :the_exception
+    )
+    for statement in code.code
+        if statement isa Expr &&
+                statement.head === :(=) &&
+                statement.args[1] isa Core.SlotNumber &&
+                (
+                    (
+                        statement.args[2] isa Core.SSAValue &&
+                            statement.args[2].id in exceptions
+                    ) ||
+                        (
+                            statement.args[2] isa Expr &&
+                                statement.args[2].head === :the_exception
+                        )
+                )
+            push!(caught, statement.args[1].id)
+        end
+    end
+    return caught
+end
+
+# The logger a `@debug` or `@info` expansion looks up, which is a union of an abstract type by design.
+const LOGGER_TYPE = Union{Nothing, Base.CoreLogging.AbstractLogger}
 
 """
 Whether inferred type `inferred` leaves the compiler without a concrete layout: abstract, a `Union`
@@ -339,6 +388,8 @@ function abstract_locals(
         if index > item.method.nargs &&
             !isempty(string(name)) &&
             !startswith(string(name), "#") &&
+            type != LOGGER_TYPE &&
+            !(index in caught_slots(item.code)) &&
             abstract_local_type(type)
     ]
 end
@@ -360,14 +411,26 @@ function is_unmarked_effect(repository::Repository, item::Inferred)::Bool
         startswith(string(item.method.file), repository.root)
 end
 
-"""Each method of `is_unmarked_effect`, one site at its signature."""
-unmarked_effects(repository::Repository, inferred::AbstractVector{Inferred})::Vector{
-    Site,
-} = [
-    Site(method_key(item.method), string(item.method.file), item.method.line)
-    for item in inferred
-    if is_unmarked_effect(repository, item)
-]
+"""
+Each method of `is_unmarked_effect` whose function has no method that returns a value, one site at its
+signature: a function with a `nothing` method beside real ones (a dispatch on "off") is not a procedure.
+"""
+function unmarked_effects(
+    repository::Repository,
+    inferred::AbstractVector{Inferred},
+)::Vector{Site}
+    valued = Set(
+        (item.method.module, item.method.name)
+        for item in inferred
+        if item.result !== Nothing
+    )
+    return [
+        Site(method_key(item.method), string(item.method.file), item.method.line)
+        for item in inferred
+        if is_unmarked_effect(repository, item) &&
+            !((item.method.module, item.method.name) in valued)
+    ]
+end
 
 """
     closure_site(type, world)
@@ -848,9 +911,8 @@ function concrete_arguments(path::AbstractString, located::AbstractVector{Locate
     return sites
 end
 
-# Result types that need no generic form: nothing, and the tuple types, whose element types name the
-# result's own parts.
-const EXEMPT_RESULT_TYPES = (:Nothing, :NamedTuple, :Tuple, :NTuple)
+# Result types that need no generic form: nothing, booleans, tuples and named tuples.
+const EXEMPT_RESULT_TYPES = (:Nothing, :Bool, :NamedTuple, :Tuple, :NTuple)
 
 """
 Whether parsed type expression `annotation` names a concrete type of `scope` or of Base (`Bool`,
@@ -995,7 +1057,15 @@ end
 untyped_argument(argument::Symbol)::Bool = true
 function untyped_argument(argument::Expr)::Bool
     if argument.head === :parameters
-        return any(untyped_argument, argument.args)
+        # A keyword splat (`; options...`) has no syntax for an annotation.
+        return any(
+            untyped_argument,
+            [
+                item
+                for item in argument.args
+                if !(item isa Expr && item.head === :... && first(item.args) isa Symbol)
+            ],
+        )
     elseif argument.head in (:kw, :...)
         return untyped_argument(first(argument.args))
     end
