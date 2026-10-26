@@ -949,10 +949,10 @@ end
 const EXEMPT_RESULT_TYPES = (:Nothing, :Bool, :NamedTuple, :Tuple, :NTuple)
 
 """
-Whether parsed type expression `annotation` names a concrete type of `scope` or of Base (`Bool`,
-`Float32`, `Vector{E}`, a package struct), alone or as a member of a `Union`. A result type must be
+Whether parsed type expression `annotation` names a concrete type of `scope` or of Base (`Float32`,
+`Vector{E}`, a package struct), alone or as a member of a `Union`. A result type must be
 generic (`typeof(x)`, a type variable, `AbstractVector{E}`), so a fixed concrete type is named here,
-except `Nothing`, tuples and `NamedTuple`s (`EXEMPT_RESULT_TYPES`) and enum types. A type variable,
+except `Nothing`, `Bool`, tuples and `NamedTuple`s (`EXEMPT_RESULT_TYPES`) and enum types. A type variable,
 `typeof(x)` and an abstract type name none.
 """
 function names_concrete_type(annotation::Symbol, scope::Module)::Bool
