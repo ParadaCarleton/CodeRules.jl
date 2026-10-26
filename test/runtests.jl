@@ -335,6 +335,10 @@ module Probe
             return nothing
         end
     end
+    function each_part(body::B, parts::Integer)::Nothing where {B}
+        foreach(body, 1:parts)
+        return nothing
+    end
 end
 
 @testset "abstract locals and bang names read what ran" begin
@@ -342,6 +346,8 @@ end
     Probe.off(nothing)
     Probe.off(1.0f0)
     Probe.catches()
+    Probe.each_part(identity, 2)
+    Probe.each_part(string, 2)
     repository = Repository(@__DIR__)
     inferred = inferred_methods(Probe)
     @testset "a generic method is typed at the types it was called with, and a catch variable is skipped" begin
@@ -351,5 +357,9 @@ end
         keys = [site.key for site in unmarked_effects(repository, inferred)]
         @test !any(contains("off"), keys)
         @test any(contains("catches"), keys)
+    end
+    @testset "a generic procedure called with several types is one site" begin
+        keys = [site.key for site in unmarked_effects(repository, inferred)]
+        @test count(contains("each_part"), keys) == 1
     end
 end

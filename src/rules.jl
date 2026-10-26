@@ -372,14 +372,14 @@ end
 
 """
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
-`abstract_local_type`, one site per variable. A method a macro generated in another package's file
+`abstract_local_type`, one site per variable however many specializations ran. A method a macro generated in another package's file
 (`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables.
 """
 function abstract_locals(
     repository::Repository,
     inferred::AbstractVector{Inferred},
 )::Vector{Site}
-    return [
+    return unique([
         Site(method_key(item.method), string(item.method.file), slot_line(item, index))
         for item in inferred
         if startswith(string(item.method.file), repository.root)
@@ -393,7 +393,7 @@ function abstract_locals(
             type != LOGGER_TYPE &&
             !(index in caught_slots(item.code)) &&
             abstract_local_type(type)
-    ]
+    ])
 end
 
 """
@@ -415,7 +415,8 @@ end
 
 """
 Each method of `is_unmarked_effect` whose function has no method that returns a value, one site at its
-signature: a function with a `nothing` method beside real ones (a dispatch on "off") is not a procedure.
+signature however many specializations ran: a function with a `nothing` method beside real ones (a
+dispatch on "off") is not a procedure.
 """
 function unmarked_effects(
     repository::Repository,
@@ -426,12 +427,12 @@ function unmarked_effects(
         for item in inferred
         if item.result !== Nothing
     )
-    return [
+    return unique([
         Site(method_key(item.method), string(item.method.file), item.method.line)
         for item in inferred
         if is_unmarked_effect(repository, item) &&
             !((item.method.module, item.method.name) in valued)
-    ]
+    ])
 end
 
 """Each closure type that the lowered code of `methods` names, with a method that names it."""
