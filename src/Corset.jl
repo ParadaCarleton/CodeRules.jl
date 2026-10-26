@@ -5,7 +5,7 @@ a `Repository` given a baseline file holds each rule to its per-rule counts ther
 offenders and lowering the counts when offenders go away. The caller picks the rules, the module and
 source files they read, and their limits.
 """
-module CodeRules
+module Corset
 
 export Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops
 

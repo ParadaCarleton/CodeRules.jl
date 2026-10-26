@@ -1,4 +1,4 @@
-# CodeRules
+# Corset
 
 Code-quality rules for Julia packages, run as tests. Each rule is a function that reads a loaded
 module (its lowered and inferred code, bindings and types) or a source file, and returns the `Site`s
@@ -14,7 +14,7 @@ A `# lint: RULE` comment on a site's line opts that one site out.
 ## Install
 
 ```julia
-pkg> add https://github.com/ParadaCarleton/CodeRules.jl
+pkg> add https://github.com/ParadaCarleton/Corset.jl
 ```
 
 Julia 1.13 or newer (JuliaSyntax kind `macro_name`).
@@ -23,7 +23,7 @@ Julia 1.13 or newer (JuliaSyntax kind `macro_name`).
 
 ```julia
 using Test
-using CodeRules: Repository, ratchet!, hidden_inputs, boxed_closures, located_source, nothing_returns, float64_sites,
+using Corset: Repository, ratchet!, hidden_inputs, boxed_closures, located_source, nothing_returns, float64_sites,
     repository_sources
 using MyPackage
 
@@ -100,5 +100,5 @@ Float64 operations in the optimized IR of one call, for a Float32 code path.
 ## Test
 
 ```julia
-pkg> test CodeRules
+pkg> test Corset
 ```

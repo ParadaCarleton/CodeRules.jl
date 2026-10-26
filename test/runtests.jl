@@ -1,8 +1,8 @@
-# CodeRules' own tests. Each rule reads deliberately bad code from `fixtures/`, kept out of `.jl`
+# Corset' own tests. Each rule reads deliberately bad code from `fixtures/`, kept out of `.jl`
 # files so a linter of this tree does not read it.
 using Test: @testset, @test, @test_logs, @test_throws
 using TOML: TOML
-using CodeRules: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
+using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
     boxed_closures, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
@@ -62,7 +62,7 @@ function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
-@testset "CodeRules" begin
+@testset "Corset" begin
     @testset "a Repository is strict by default" begin
         repository = Repository(".")
         @test repository.root == abspath(".")
