@@ -28,6 +28,10 @@ function boxed(start::Int)::Function
     total = 2
     return add
 end
+const LINELESS_BODY = Expr(:->, :step, Expr(:call, :+, :value, :step))
+@eval function lineless(value::Int)::Function
+    return $LINELESS_BODY
+end
 
 struct Holder
     held::Real

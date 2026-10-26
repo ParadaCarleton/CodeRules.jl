@@ -129,8 +129,14 @@ end
     end
 
     @testset "closure: closures that capture data, and those holding a Core.Box" begin
-        @test length(capturing_closures(fixture)) == 2
-        @test site_keys(boxed_closures(fixture)) == ["fixture.jl"]
+        sites = Dict(site.key => site for site in capturing_closures(fixture))
+        @test Set(keys(sites)) == Set(["fixture.jl adder", "fixture.jl boxed", "fixture.jl lineless"])
+        @test site_keys(boxed_closures(fixture)) == ["fixture.jl boxed"]
+        @testset "a closure built without line numbers sits at the function that creates it" begin
+            fixture_lines = readlines(joinpath(root, "fixture.jl"))
+            @test sites["fixture.jl lineless"].line == findfirst(startswith("@eval function lineless"), fixture_lines)
+            @test sites["fixture.jl lineless"].file == joinpath(root, "fixture.jl")
+        end
     end
 
     @testset "abstract-field, repeated-prefix: struct fields" begin

@@ -434,24 +434,46 @@ function unmarked_effects(
     ]
 end
 
-"""
-    closure_site(type, world)
+"""Each closure type that the lowered code of `methods` names, with a method that names it."""
+closure_namers(mod::Module, methods::AbstractVector{Method})::Dict{Core.TypeName, Method} = Dict{Core.TypeName, Method}(
+    created => method
+    for method in methods
+    for code in (lowered(method),)
+    if code isa Core.CodeInfo
+    for created in named_closures(code, mod)
+)
 
-The site of closure type `type`: its call method's file and line, keyed by the file because closure
-type names carry compiler counters. A closure with no call method, or a macro-generated one with no
-source file, is keyed "none" and cannot be opted out.
 """
-function closure_site(type::Type, world::Integer)::Site
-    matches = Base._methods_by_ftype(
-        Tuple{Base.unwrap_unionall(type), Vararg{Any}},
-        -1,
-        world,
-    )
-    if isempty(matches)
-        return Site("none", "", 0)
+The method that creates closure type `name`: its namer in `namers` (`closure_namers`), followed out of
+nested closures to the first namer that is not itself a closure.
+"""
+function closure_definer(name::Core.TypeName, namers::AbstractDict{Core.TypeName, Method})::Method
+    definer = namers[name]
+    # Each pass moves out one closure, so no chain of namers is longer than the closures named.
+    for _ in 1:length(namers)
+        outer = callee_name(definer)
+        if !haskey(namers, outer)
+            return definer
+        end
+        definer = namers[outer]
     end
-    method = first(matches).method
-    return Site(basename(string(method.file)), string(method.file), method.line)
+    return definer
+end
+
+"""
+    closure_site(type, definer, world)
+
+The site of closure type `type`, created by method `definer` (`closure_definer`), keyed by `definer`'s file
+and name (`method_key`) because closure type names carry compiler counters. It sits at the closure's call
+method, or at `definer` when that method has no source file (code built without line numbers).
+"""
+function closure_site(type::DataType, definer::Method, world::Integer)::Site
+    matches = Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)
+    placed = definer
+    if !isempty(matches) && first(matches).method.file !== :none
+        placed = first(matches).method
+    end
+    return Site(method_key(definer), string(placed.file), placed.line)
 end
 
 """The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
@@ -469,8 +491,9 @@ end
 """Each `live_closure_types` closure of `mod` that captures data (a closure type with fields), as a `closure_site`."""
 function capturing_closures(mod::Module)::Vector{Site}
     world = Base.get_world_counter()
+    namers = closure_namers(mod, defined_methods(mod))
     return [
-        closure_site(type, world)
+        closure_site(type, closure_definer(type.name, namers), world)
         for type in live_closure_types(mod)
         if fieldcount(type) > 0
     ]
@@ -479,13 +502,14 @@ end
 """
 Each `live_closure_types` closure of `mod` holding a `Core.Box`: a captured variable that the
 closure or its definer rebinds, so every read of it is dynamically typed and the two scopes share it.
-The closure ratchet counts capturing closures per file against a baseline, so a counted closure that
+The closure ratchet counts capturing closures per file and function against a baseline, so a counted closure that
 gains a Box goes unseen there; a Box is never tolerated.
 """
 function boxed_closures(mod::Module)::Vector{Site}
     world = Base.get_world_counter()
+    namers = closure_namers(mod, defined_methods(mod))
     return [
-        closure_site(type, world)
+        closure_site(type, closure_definer(type.name, namers), world)
         for type in live_closure_types(mod)
         if Core.Box in fieldtypes(type)
     ]
