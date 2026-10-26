@@ -1,0 +1,46 @@
+const LIMIT = 3
+counter = Ref(0)
+reads_counter(value::Int)::Int = value + counter[]
+reads_limit(value::Int)::Int = value + LIMIT
+
+function abstract_local(value::Int)::Int
+    holder = Any[value]
+    return holder[1]
+end
+function concrete_local(value::Int)::Int
+    doubled = 2 * value
+    return doubled
+end
+
+function announce(value::Int)::Nothing
+    println(devnull, value)
+    return nothing
+end
+function announce!(value::Int)::Nothing
+    println(devnull, value)
+    return nothing
+end
+
+adder(value::Int)::Function = step -> value + step
+function boxed(start::Int)::Function
+    total = start
+    add = step -> total + step
+    total = 2
+    return add
+end
+
+struct Holder
+    held::Real
+end
+struct Plain
+    held::Int
+end
+struct SolverControls
+    solver_tolerance::Int
+end
+
+broken(value::Int)::Int = value + "one"
+unstable(box::Base.RefValue{Any})::Int = box[] + 1
+make_box()::Base.RefValue{Any} = Base.RefValue{Any}(1)
+widened(value::Float32)::Float32 = Float32(sqrt(Float64(value)) * 0.1)
+narrow(value::Float32)::Float32 = value * 2.5f0

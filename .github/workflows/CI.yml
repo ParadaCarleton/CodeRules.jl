@@ -2,14 +2,22 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["*"]
   pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        version: ['1', 'pre']
+        version: ["1.12", "1"]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2

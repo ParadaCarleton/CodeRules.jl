@@ -1,5 +1,5 @@
-# The ratchet every code-quality rule reports through. A rule hands `ratchet!` the sites it found;
-# the repository's baseline file fails a site it does not hold and falls when a run finds fewer.
+# The check every code-quality rule reports through. A rule hands `ratchet!` the sites it found. With no
+# baseline every site fails; a baseline file allows the sites it holds and falls when a run finds fewer.
 
 using Test: @test
 using TOML: TOML
@@ -9,17 +9,30 @@ using TOML: TOML
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
 
 """
-The tree the rules read and where they keep their counts: `root` is the absolute path of the tree
-whose source the rules read, `baseline` the TOML file of per-rule allowances, and
-`one_letter_exempt` the variable names the one-letter rule allows besides `_` (a project's own
-convention, such as an argument everywhere named `p`). `baseline` may be a link: `ratchet!` resolves
-it at each call, so a lowering lands in the file it points to, even in a worker that lives across jobs.
+    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = ())
+
+The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
+finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
+
+- `baseline`: the TOML file of per-rule allowances that `ratchet!` holds findings to; `nothing` allows none.
+  It may be a link: `ratchet!` resolves it at each call, so a lowering lands in the file it points to.
+- `one_letter_exempt`: the variable names the one-letter rule allows besides `_` (a project's own
+  convention, such as an argument everywhere named `p`).
+- `skipped_directories`: directory names `repository_sources` leaves out wherever they sit, such as
+  `("vendor",)`. Hidden directories (a leading `.`) are always left out.
 """
 struct Repository
     root::String
-    baseline::String
+    baseline::Union{String, Nothing}
     one_letter_exempt::Tuple{Vararg{Symbol}}
+    skipped_directories::Tuple{Vararg{String}}
 end
+Repository(
+    root::AbstractString;
+    baseline::Union{String, Nothing} = nothing,
+    one_letter_exempt::Tuple{Vararg{Symbol}} = (),
+    skipped_directories::Tuple{Vararg{String}} = (),
+)::Repository = Repository(abspath(root), baseline, one_letter_exempt, skipped_directories)
 
 """
 One offender a rule found: `key` names it in the baseline; `file` (a path, empty when the offender
@@ -82,37 +95,16 @@ function opt_outs(path::AbstractString, rule::AbstractString)::OptOuts
     return OptOuts(whole_file, lines)
 end
 
-"""
-    opt_out_counts(files)
-
-How many opt-out comments of each rule `files` carry (a `-begin`/`-end` pair is one), so the
-exceptions stay visible beside the baseline.
-"""
-function opt_out_counts(files::AbstractVector{<:AbstractString})::Dict{String, Int}
-    counts = Dict{String, Int}()
-    for file in files
-        for text in eachline(file)
-            for found in eachmatch(OPT_OUT, text)
-                if found[2] != "end"
-                    counts[found[1]] = get(counts, found[1], 0) + 1
-                end
-            end
-        end
-    end
-    return counts
+"""The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
+function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
+    entries = readdir(directory; join = true)
+    entered = [entry for entry in entries if isdir(entry) && !islink(entry) && !startswith(basename(entry), ".") && !(basename(entry) in skipped)]
+    return vcat([entry for entry in entries if !isdir(entry) && endswith(entry, ".jl")], (file for nested in entered for file in julia_files(nested, skipped))...)
 end
 
-"""The Julia files under `directories` of `repository`, `vendor` and hidden directories excluded."""
-function repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String}
-    found = String[]
-    for directory in directories
-        for (root, subdirectories, names) in walkdir(joinpath(repository.root, directory))
-            filter!(name -> !startswith(name, ".") && name != "vendor", subdirectories)
-            append!(found, joinpath(root, name) for name in names if endswith(name, ".jl"))
-        end
-    end
-    return sort!(found)
-end
+"""The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
+repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
+    sort!([file for directory in directories for file in julia_files(joinpath(repository.root, directory), repository.skipped_directories)])
 
 """The baseline entry left after `found` sites against `entry`: a note stays while its offender has a site, a count falls to `found`."""
 remaining(entry::AbstractString, found::Integer)::Union{String, Int} = ifelse(found == 0, 0, entry)
@@ -131,18 +123,31 @@ function write_baseline!(baseline::AbstractDict, path::AbstractString)::String
     return mv(staged, path; force = true)
 end
 
-"""
-    ratchet!(repository, rule, sites; scopes = ("",))
+"""Log `over`, the keys of `measured` past what `allowance` names allows, with `fix` (how to repair one) when given, and return it."""
+function logged_over(rule::String, measured::AbstractDict{String, Int}, over::AbstractVector{String}, allowance::String, fix::String)::Vector{String}
+    if !isempty(over)
+        advice = ifelse(isempty(fix), "", "\nFix: $fix")
+        @error "$rule: offenders past $allowance:\n" * join(["$key = $(measured[key])" for key in over], "\n") * advice
+    end
+    return over
+end
 
-Hold `rule`'s offenders to its table in `repository.baseline`. Sites that a `# lint:` comment naming the
-rule opts out are dropped and counted in the log; the rest are tallied by key. A test fails, listing
-them, on keys past their baseline entry; an entry the tally undercuts is lowered or deleted and the
-file rewritten. A rule with no table is seeded with its tally. Returns the keys past the baseline.
-Several testsets may share one rule's table, and a run may not measure all of it (a job's copy of the
-tree lacks directories): each passes the prefixes `scopes` that begin the keys it measures, and only
-entries under one of them can fall.
 """
-function ratchet!(repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",))::Vector{String}
+    offenders!(repository, rule, sites; scopes = ("",), fix = "")
+
+The keys of `rule`'s offenders `sites` that `repository` does not allow, logged. Sites that a `# lint:`
+comment naming the rule opts out are dropped and counted in the log; the rest are tallied by key.
+Without a baseline (`Repository`'s default) every key is returned. With one, the offenders are held to
+`rule`'s table in the baseline file: the keys past their entry are returned, and an entry the tally
+undercuts is lowered or deleted and the file rewritten. A rule with no table is seeded with its tally.
+Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
+the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
+one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
+the rule accepts.
+"""
+function offenders!(
+        repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
+    )::Vector{String}
     skips = Dict{String, OptOuts}()
     measured = Dict{String, Int}()
     opted = 0
@@ -159,9 +164,13 @@ function ratchet!(repository::Repository, rule::String, sites::AbstractVector{Si
     if opted > 0
         @info "$rule: $opted site(s) opted out by `# lint: $rule`"
     end
-    # ponytail: testsets on separate retest workers may rewrite at once; the rename is atomic, so
+    baseline_file = repository.baseline
+    if isnothing(baseline_file)
+        return logged_over(rule, measured, sort!(collect(keys(measured))), "no baseline", fix)
+    end
+    # ponytail: testsets on separate processes may rewrite at once; the rename is atomic, so
     # one lowering can be lost (the baseline stays higher, never wrong) and the next run redoes it.
-    path = realpath(repository.baseline)
+    path = realpath(baseline_file)
     baseline = TOML.parsefile(path)
     if !haskey(baseline, rule)
         baseline[rule] = measured
@@ -184,9 +193,19 @@ function ratchet!(repository::Repository, rule::String, sites::AbstractVector{Si
         write_baseline!(baseline, path)
         @info "$rule fell: baseline lowered in $path" improved
     end
-    if !isempty(over)
-        @error "$rule: offenders past the baseline in $path:\n" * join(["$key = $(measured[key])" for key in over], "\n")
-    end
+    return logged_over(rule, measured, over, "the baseline in $path", fix)
+end
+
+"""
+    ratchet!(repository, rule, sites; scopes = ("",), fix = "")
+
+A test that `rule`'s offenders `sites` are all allowed: it fails on the keys `offenders!` returns, and
+returns them.
+"""
+function ratchet!(
+        repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
+    )::Vector{String}
+    over = offenders!(repository, rule, sites; scopes, fix)
     @test isempty(over)
     return over
 end

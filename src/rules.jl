@@ -1,6 +1,8 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
 # bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
 
+const SYNTAX = Base.JuliaSyntax
+
 """Definitions, not state: a `DataType` is itself `ismutable`."""
 is_definition(value::Any)::Bool = value isa Union{Type, Function, Module}
 
@@ -779,29 +781,37 @@ function return_type_calls(path::AbstractString, located::AbstractVector{Located
     ]
 end
 
-"""The name a parsed `struct` definition `node` declares, whatever its parameters and supertype."""
-function struct_name(node::Expr)::Symbol
-    header = node.args[2]
-    while header isa Expr && header.head in (:<:, :curly)
-        header = first(header.args)
+const STRUCT_KIND = SYNTAX.@K_str "struct"
+const CURLY_KIND = SYNTAX.@K_str "curly"
+const SUBTYPE_KIND = SYNTAX.@K_str "<:"
+
+"""The name a `struct` syntax node declares, whatever its parameters and supertype, as Julia names the type (`var"Odd Name"` gives `Symbol("Odd Name")`)."""
+function struct_name(node::SYNTAX.SyntaxNode)::Symbol
+    header = first(SYNTAX.children(node))
+    while SYNTAX.kind(header) in (CURLY_KIND, SUBTYPE_KIND)
+        header = first(SYNTAX.children(header))
     end
-    return Symbol(string(header))
+    return Symbol(Expr(header))
 end
 
-"""Where each struct of the parsed source `files` is declared: its name with the file and line of its `struct`."""
-function struct_locations(files::AbstractVector{<:AbstractString})::Dict{
-    Symbol,
-    Tuple{String, Int},
-}
-    locations = Dict{Symbol, Tuple{String, Int}}()
-    for file in files
-        for item in located_source(file)
-            if item.node.head === :struct
-                locations[struct_name(item.node)] = (file, item.line)
-            end
-        end
+"""The `struct` syntax nodes at or below `node`, as name => line of the `struct` keyword (never the docstring's line above it)."""
+function struct_lines(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, Int}}
+    if SYNTAX.is_leaf(node)
+        return Pair{Symbol, Int}[]
     end
-    return locations
+    nested = vcat(Pair{Symbol, Int}[], (struct_lines(child) for child in SYNTAX.children(node))...)
+    if SYNTAX.kind(node) === STRUCT_KIND
+        return vcat(struct_name(node) => first(SYNTAX.source_location(node)), nested)
+    end
+    return nested
+end
+
+"""Where each struct of the parsed source `files` is declared: its name with the file and line of its `struct` keyword, so a `# lint:` comment on that line opts the struct out even when a docstring sits above it."""
+function struct_locations(files::AbstractVector{<:AbstractString})::Dict{Symbol, Tuple{String, Int}}
+    return Dict{Symbol, Tuple{String, Int}}(
+        name => (file, line) for file in files
+            for (name, line) in struct_lines(SYNTAX.parseall(SYNTAX.SyntaxNode, read(file, String); filename = file))
+    )
 end
 
 const CONCRETE_CONTAINERS = (:Vector, :Matrix, :Array, :Dict)
@@ -972,6 +982,12 @@ function constructs_own_type(node::Expr)::Bool
     return !isnothing(returned) && type_head(first(call.args)) === returned
 end
 
+"""The repair `ratchet!`'s `fix` names for a `concrete_returns` offender: the result annotations the rule accepts."""
+const CONCRETE_RETURN_FIX =
+    "annotate the result generically: a type variable the arguments bind (`function f(x::T)::T where {T}`, " *
+    "or `(f(x::T)::T) where {T} = …` on one line), `typeof(x)`, or an abstract type " *
+    "(`AbstractVector{E}`, `AbstractMatrix{E}`, never `Vector{E}` or `Matrix{E}`)"
+
 """
 Methods whose declared return type names a concrete type (`names_concrete_type`), one site per
 method at its signature, keyed by file and function name: a result type must be generic, annotated by
@@ -997,7 +1013,6 @@ function concrete_returns(
     ]
 end
 
-const SYNTAX = Base.JuliaSyntax
 const FLOAT_KIND = SYNTAX.@K_str "Float"
 const IDENTIFIER_KIND = SYNTAX.@K_str "Identifier"
 const MACROCALL_KIND = SYNTAX.@K_str "macrocall"
@@ -1160,6 +1175,8 @@ end
 
 # One line of `fatou lint --output concise`: file, line, column, severity, rule and message.
 const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "
+# Fatou's closing line, `checked N file(s): clean` or with a finding count; it is no finding.
+const FATOU_SUMMARY = r"^checked \d+ file\(s\)"
 
 """The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
 present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{
@@ -1188,24 +1205,13 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
     )
     printed = IOBuffer()
     run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
-    lines = [
-        line
-        for line in split(String(take!(printed)), '\n'; keepempty = false)
-        if !startswith(line, "checked ")
-    ]
+    lines = split(String(take!(printed)), '\n'; keepempty = false)
     findings = match.(FATOU_FINDING, lines)
-    unread = lines[isnothing.(findings)]
+    unread = lines[isnothing.(findings) .& .!occursin.(FATOU_SUMMARY, lines)]
     if !isempty(unread)
         error("fatou lint printed lines that are no finding:\n" * join(unread, "\n"))
     end
-    return [
-        Site(
-            "$(found[1]) $(found[3])",
-            joinpath(repository.root, found[1]),
-            parse(Int, found[2]),
-        )
-        for found in findings
-    ]
+    return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2])) for found in findings if !isnothing(found)]
 end
 
 """A `Site` keyed `name` at the declaration of struct `name`."""

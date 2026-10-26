@@ -1,12 +1,13 @@
 """
-Code-quality rules checked on a loaded module and on its repository's Julia source. A rule finds
-`Site`s; `ratchet!` holds them to the per-rule counts in the `Repository`'s baseline file, failing a
-test on new offenders and lowering the counts when offenders go away. The caller picks the rules
-(each is a function returning sites), the module and source files they read, and their limits.
+Code-quality rules checked on a loaded module and on its repository's Julia source. A rule is a
+function returning the `Site`s it finds; `ratchet!` fails a test on them. By default every site fails;
+a `Repository` given a baseline file holds each rule to its per-rule counts there instead, failing on new
+offenders and lowering the counts when offenders go away. The caller picks the rules, the module and
+source files they read, and their limits.
 """
 module CodeRules
 
-export Repository, Site, ratchet!, @call_sites, @opt_sites, float64_ops
+export Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops
 
 include("ratchet.jl")
 include("rules.jl")

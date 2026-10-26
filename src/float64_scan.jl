@@ -1,5 +1,5 @@
 # Counts Float64 operations in a call's fully optimized IR, a check for widening that a wrapper
-# number type (StrictFloat32) cannot see. See `float64_ops`.
+# number type (one that throws on promotion to Float64) cannot see. See `float64_ops`.
 using InteractiveUtils: code_llvm
 
 const FLOAT64_IR_OPS =
@@ -10,9 +10,9 @@ const FLOAT64_IR_OPS =
 
 Number of Float64 operations in the fully optimized IR of `f(::types...)`.
 
-A wrapper type observes a Float64 only when it is promoted with, or converted from,
-one of ours, so a dependency that computes internally at Float64 and narrows before
-returning is invisible to Strict32 — the expensive silent case, where the caller pays
+A wrapper number type observes a Float64 only when it is promoted with, or converted
+from, a wrapped number, so a dependency that computes internally at Float64 and narrows
+before returning is invisible to it — the expensive silent case, where the caller pays
 Float64 arithmetic and keeps Float32 storage. The IR sees that widening whichever
 package caused it, without forking or instrumenting the dependency.
 

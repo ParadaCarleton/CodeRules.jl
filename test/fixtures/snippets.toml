@@ -1,0 +1,121 @@
+# Julia source each per-file rule reads in test/runtests.jl, one table per rule.
+
+[nothing-return]
+source = '''
+maybe(flag::Bool)::Union{Nothing, Int} = flag ? 1 : nothing
+sure(flag::Bool)::Int = 1
+'''
+
+[range-guard]
+source = '''
+guard(value::Float32)::Bool = value < floatmax(Float32)
+edge(value::Int)::Bool = value < 709
+finite(value::Float32)::Bool = isfinite(exp(value))
+plain(value::Int)::Bool = value < 10
+'''
+
+[repeated-statement]
+source = '''
+function twice(value::Int)::Int
+    value += 1
+    value += 1
+    return value
+end
+function branches(flag::Bool)::Int
+    if flag
+        total = 1
+    else
+        total = 1
+    end
+    return total
+end
+'''
+
+[return-type]
+source = '''
+guess(callee::Function)::Type = Core.Compiler.return_type(callee, Tuple{})
+known(callee::Function)::Type = typeof(callee)
+'''
+
+[concrete-arg]
+source = '''
+first_of(values::Vector{Int})::Int = first(values)
+grows(values::Vector{Int})::Vector{Int} = push!(values, 1)
+viewed(values::AbstractVector{Int})::Int = first(values)
+'''
+
+[concrete-return]
+source = '''
+fixed(value::Int)::Int = value
+(generic(value::T)::T) where {T} = value
+(squared(values::AbstractMatrix{T})::Matrix{T}) where {T} = values * values
+(viewed(values::AbstractMatrix{T})::AbstractMatrix{T}) where {T} = values
+empty_result(value::Int)::Nothing = nothing
+Some(value::Int)::Some = Some{Int}(value)
+'''
+
+[float64]
+source = '''
+widen(value::Float32)::Float64 = value * 2.0
+quoted()::Symbol = :Float64
+narrow(value::Float32)::Float32 = value * 2f0
+limit()::Float32 = Base.Inf32
+'''
+
+[annotation]
+source = '''
+untyped(value) = value
+no_result(value::Int) = value
+typed(value::Int)::Int = value
+'''
+
+[one-letter]
+source = '''
+scale(p::Int, k::Int)::Int = p * k
+count_all(values::AbstractVector{Int})::Int = sum(_ -> 1, values)
+'''
+
+[misplaced-import]
+main = '''
+module Main1
+using A: a, b
+using C: c
+import D
+include("child.jl")
+f() = b
+end
+'''
+child = '''
+g() = a + b + c
+'''
+kept = '''
+import MKL # fatou-ignore unused-import
+using Test
+'''
+
+# Documented structs, one with a docstring line that reads like a declaration.
+[struct-line]
+source = '''
+"""
+A documented struct; its docstring mentions
+struct Decoy
+which declares nothing.
+"""
+struct Documented{T} <: Number # lint: wide-struct
+    held::T
+end
+
+"""A documented mutable struct."""
+mutable struct Counter
+    count::Int
+end
+
+struct Plain
+    held::Int
+end
+
+"""A struct whose name needs `var`."""
+struct var"Odd Name"
+    held::Int
+end
+'''
