@@ -396,10 +396,32 @@ function abstract_locals(
     ])
 end
 
+"""Whether statement `statement` calls one of the arguments `arguments` (slot numbers) of its method."""
+calls_argument(statement::Expr, arguments::AbstractUnitRange)::Bool =
+    statement.head === :call && first(statement.args) isa Core.SlotNumber && first(statement.args).id in arguments
+calls_argument(statement::Any, arguments::AbstractUnitRange)::Bool = false
+
+"""
+Whether a `return` in `method`'s lowered code returns a call to one of its arguments (`f()` in
+`wrap(f) = f()`): its result is that argument's, so the types its callers passed decide nothing.
+"""
+function returns_argument_call(method::Method)::Bool
+    code = lowered(method)
+    if isnothing(code)
+        return false
+    end
+    return any(
+        statement isa Core.ReturnNode && isdefined(statement, :val) && statement.val isa Core.SSAValue &&
+            calls_argument(code.code[statement.val.id], 2:method.nargs)
+        for statement in code.code
+    )
+end
+
 """
 Whether `item` is a named function of `repository`, not a closure or another package's function
 (`Base.show`, a keyword call), that inference types as always returning `nothing` yet whose name
-does not end in `!`: it exists for its effect, so its name says so.
+does not end in `!`: it exists for its effect, so its name says so. A method returning a call to its
+argument (`returns_argument_call`) gets no verdict: its callers' arguments decide its result.
 """
 function is_unmarked_effect(repository::Repository, item::Inferred)::Bool
     function_type = Base.unwrap_unionall(item.method.sig).parameters[1]
@@ -410,7 +432,8 @@ function is_unmarked_effect(repository::Repository, item::Inferred)::Bool
         function_type isa DataType &&
         function_type <: Function &&
         function_type.name.module === item.method.module &&
-        startswith(string(item.method.file), repository.root)
+        startswith(string(item.method.file), repository.root) &&
+        !returns_argument_call(item.method)
 end
 
 """

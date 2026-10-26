@@ -339,6 +339,13 @@ module Probe
         foreach(body, 1:parts)
         return nothing
     end
+    function passing(thunk::F) where {F}
+        try
+            return thunk()
+        catch exception
+            rethrow(exception)
+        end
+    end
 end
 
 @testset "abstract locals and bang names read what ran" begin
@@ -348,6 +355,7 @@ end
     Probe.catches()
     Probe.each_part(identity, 2)
     Probe.each_part(string, 2)
+    Probe.passing(() -> nothing)
     repository = Repository(@__DIR__)
     inferred = inferred_methods(Probe)
     @testset "a generic method is typed at the types it was called with, and a catch variable is skipped" begin
@@ -361,5 +369,8 @@ end
     @testset "a generic procedure called with several types is one site" begin
         keys = [site.key for site in unmarked_effects(repository, inferred)]
         @test count(contains("each_part"), keys) == 1
+    end
+    @testset "a method returning a call to its argument gets no verdict from what its callers passed" begin
+        @test !any(contains("passing"), [site.key for site in unmarked_effects(repository, inferred)])
     end
 end
