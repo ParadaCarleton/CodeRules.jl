@@ -17,7 +17,7 @@ A `# lint: RULE` comment on a site's line opts that one site out.
 pkg> add https://github.com/ParadaCarleton/CodeRules.jl
 ```
 
-Julia 1.12 or newer.
+Julia 1.13 or newer (JuliaSyntax kind `macro_name`).
 
 ## Use
 
