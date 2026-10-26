@@ -1,4 +1,4 @@
-# Corset' own tests. Each rule reads deliberately bad code from `fixtures/`, kept out of `.jl`
+# Corset's own tests. Each rule reads deliberately bad code from `fixtures/`, kept out of `.jl`
 # files so a linter of this tree does not read it.
 using Test: @testset, @test, @test_logs, @test_throws
 using TOML: TOML
