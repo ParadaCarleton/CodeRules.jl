@@ -7,3 +7,5 @@ concrete annotations, `Float64` literals, one-letter names, misplaced imports (`
 short-form `where` bugs (`fix_where_returns!` fixes them), Fatou and JET findings.
 
 Extracted from irv-extremism `packages/CodeRules`.
+
+Licensed under the Mozilla Public License 2.0 (`LICENSE`).
