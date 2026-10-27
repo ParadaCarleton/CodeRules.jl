@@ -7,7 +7,7 @@ makedocs(;
     authors = "Carlos Parada",
     modules = [Corset],
     format = Documenter.HTML(canonical = "https://paradacarleton.github.io/Corset.jl/stable", size_threshold_warn = 200 * 1024),
-    pages = ["Home" => "index.md"],
+    pages = ["Home" => "index.md", "Guide" => "guide.md", "Rules" => "rules.md", "API" => "api.md"],
     warnonly = false,
 )
 
