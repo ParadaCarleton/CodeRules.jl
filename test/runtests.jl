@@ -284,10 +284,12 @@ end
 end
 
 @testset "a script without a module keeps the imports its included files use" begin
-    result = placed([
-        "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-        "child.jl" => "g() = a\n",
-    ])
+    result = placed(
+        [
+            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
+            "child.jl" => "g() = a\n",
+        ]
+    )
     @test result["child.jl"] == "using A: a\ng() = a\n"
 end
 
@@ -300,10 +302,12 @@ end
     @testset "a keyword splat needs no annotation, and Bool is an allowed result" begin
         text = "f(x::T; options...)::Bool where {T} = true\n"
         @test isempty(check(text, missing_annotations))
-        @test isempty(check(
-            text,
-            (path, located) -> concrete_returns(path, located, Main),
-        ))
+        @test isempty(
+            check(
+                text,
+                (path, located) -> concrete_returns(path, located, Main),
+            )
+        )
     end
     @testset "a positional argument still needs one" begin
         @test length(check("f(x)::Bool = true\n", missing_annotations)) == 1
@@ -311,10 +315,12 @@ end
 end
 
 @testset "a name used only inside a macro call counts as used" begin
-    result = placed([
-        "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-        "child.jl" => "@testset \"x\" begin\n    @test f(a(2))\nend\n",
-    ])
+    result = placed(
+        [
+            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
+            "child.jl" => "@testset \"x\" begin\n    @test f(a(2))\nend\n",
+        ]
+    )
     @test result["child.jl"] == "using A: a\n@testset \"x\" begin\n    @test f(a(2))\nend\n"
 end
 

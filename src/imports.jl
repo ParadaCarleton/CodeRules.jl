@@ -217,10 +217,14 @@ function unit_moves(unit::AbstractVector{ImportFile})::Vector{ImportMove}
     end
     supplied = any(has_bare_using, unit)
     return [
-        ImportMove(file.path, statement, item, unique([
-            other.path for other in unit if other.editable && !supplied && other.path != file.path && item.name in other.used &&
-                !imports_name(other, item.name) && (!statement.nested || other.path in file.includes)
-        ]))
+        ImportMove(
+            file.path, statement, item, unique(
+                [
+                    other.path for other in unit if other.editable && !supplied && other.path != file.path && item.name in other.used &&
+                        !imports_name(other, item.name) && (!statement.nested || other.path in file.includes)
+                ]
+            )
+        )
             for file in unit if file.editable for statement in file.statements if !statement.pinned
             for item in statement.items if occursin(PLACED_NAME, item.name) && !(item.name in file.used)
     ]
