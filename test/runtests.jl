@@ -339,6 +339,13 @@ module Probe
         foreach(body, 1:parts)
         return nothing
     end
+    struct Buffer{E <: Real}
+        entries::Vector{E}
+    end
+    function Buffer(point::AbstractVector{E}, extra::Integer)::Buffer{E} where {E <: Real}
+        entries = Vector{E}(undef, length(point) + extra)
+        return Buffer(entries)
+    end
     function passing(thunk::F) where {F}
         try
             return thunk()
@@ -356,9 +363,10 @@ end
     Probe.each_part(identity, 2)
     Probe.each_part(string, 2)
     Probe.passing(() -> nothing)
+    Probe.Buffer(Float32[1, 2], 1)
     repository = Repository(@__DIR__)
     inferred = inferred_methods(Probe)
-    @testset "a generic method is typed at the types it was called with, and a catch variable is skipped" begin
+    @testset "a generic method or constructor is typed at the types it was called with, and a catch variable is skipped" begin
         @test isempty(abstract_locals(repository, inferred))
     end
     @testset "a nothing method beside a valued one is not a procedure; a lone one is" begin
