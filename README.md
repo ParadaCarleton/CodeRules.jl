@@ -18,7 +18,6 @@ pkg> add https://github.com/ParadaCarleton/Corset.jl
 ```
 
 Julia 1.13 or newer (JuliaSyntax kind `macro_name`).
-
 ## Use
 
 ```julia
@@ -96,9 +95,3 @@ below are conventions.
 `located` is `located_source(file)`, the parsed file. `struct_site(name, struct_locations(files))`
 places a struct rule's site at the `struct` line, below any docstring. `float64_ops(f, types)` counts
 Float64 operations in the optimized IR of one call, for a Float32 code path.
-
-## Test
-
-```julia
-pkg> test Corset
-```
