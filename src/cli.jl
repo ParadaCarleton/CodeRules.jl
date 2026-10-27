@@ -97,10 +97,10 @@ end
 
 """`config` with the pedantic group switched on when `pedantic` is set and the levels in `overrides` (rule => level) applied."""
 function with_overrides(
-    config::Config,
-    pedantic::Bool,
-    overrides::AbstractVector{<:Pair{String, Symbol}},
-)::Config
+        config::Config,
+        pedantic::Bool,
+        overrides::AbstractVector{<:Pair{String, Symbol}},
+    )::Config
     levels = merge(config.levels, Dict(overrides))
     unknown = setdiff(keys(levels), rule_name.(RULES))
     if !isempty(unknown)
@@ -122,8 +122,8 @@ end
 function level_overrides(arguments::AbstractDict)::Vector{Pair{String, Symbol}}
     return [
         rule => Symbol(name)
-        for name in ("allow", "warn", "deny")
-        for rule in something(arguments[name], String[])
+            for name in ("allow", "warn", "deny")
+            for rule in something(arguments[name], String[])
     ]
 end
 
@@ -179,11 +179,11 @@ end
 
 """Print `findings` to `io` in `format` (human, concise or json)."""
 function print_findings(
-    io::IO,
-    root::AbstractString,
-    findings::AbstractVector{Finding},
-    format::AbstractString,
-)::Nothing
+        io::IO,
+        root::AbstractString,
+        findings::AbstractVector{Finding},
+        format::AbstractString,
+    )::Nothing
     if format == "json"
         records = [
             (;
@@ -192,7 +192,7 @@ function print_findings(
                     finding.site,
                 ), line = finding.site.line,
             )
-            for finding in findings
+                for finding in findings
         ]
         json = Base.require(@__MODULE__, :JSON)
         println(io, Base.invokelatest(json.json, records))

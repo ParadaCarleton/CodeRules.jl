@@ -6,11 +6,11 @@ using PrecompileTools: PrecompileTools, @compile_workload
 
 """A package for the precompile workload to check: it holds one finding for a module rule to report."""
 module WorkloadPackage
-const COUNTER = Ref(0)
-bump(x) = x + COUNTER[]
-struct Holder
-    held::Any
-end
+    const COUNTER = Ref(0)
+    bump(x) = x + COUNTER[]
+    struct Holder
+        held::Any
+    end
 end
 
 @compile_workload begin

@@ -22,12 +22,12 @@ The findings among `sites` of `rule` at `level`: the sites no `# lint:` comment 
 baseline does not allow. With `update`, the baseline is seeded and lowered as `offenders!` does.
 """
 function judge(
-    repository::Repository,
-    rule::Rule,
-    level::Symbol,
-    sites::AbstractVector{Site},
-    update::Bool,
-)::Vector{Finding}
+        repository::Repository,
+        rule::Rule,
+        level::Symbol,
+        sites::AbstractVector{Site},
+        update::Bool,
+    )::Vector{Finding}
     name = rule_name(rule)
     over = String[]
     if update
@@ -41,23 +41,23 @@ function judge(
     end
     return [
         Finding(name, level, site)
-        for site in first(unopted(sites, name))
-        if site.key in over
+            for site in first(unopted(sites, name))
+            if site.key in over
     ]
 end
 
 """The names of the rules in `rules` that read the loaded package."""
 module_rule_names(rules::Tuple)::Vector{String} = [
     rule_name(rule)
-    for rule in rules
-    if rule isa ModuleRule
+        for rule in rules
+        if rule isa ModuleRule
 ]
 
 """The rules `config` leaves on."""
 enabled_rules(config::Config)::Tuple = Tuple(
     rule
-    for rule in RULES
-    if level(config, rule) !== :allow
+        for rule in RULES
+        if level(config, rule) !== :allow
 )
 
 """Run the fixer of every fixable rule in `rules` over the files `context` names."""
@@ -72,10 +72,10 @@ end
 
 """The unified diff from the file `before` to the file `after`, labeled `label`; empty when they match."""
 function file_diff(
-    label::AbstractString,
-    before::AbstractString,
-    after::AbstractString,
-)::String
+        label::AbstractString,
+        before::AbstractString,
+        after::AbstractString,
+    )::String
     return read(
         ignorestatus(
             `$(diffutils_jll._diff()) -u --label a/$label --label b/$label $before $after`,
@@ -104,7 +104,7 @@ function fix_diff(config::Config, root::AbstractString)::String
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(
         file_diff(label, joinpath(original.root, label), joinpath(copies, label))
-        for label in labels
+            for label in labels
     )
 end
 
@@ -117,12 +117,12 @@ for the rules that have a fixer. `update_baseline` seeds and lowers the baseline
 baseline is only read.
 """
 function run_rules(
-    config::Config,
-    root::AbstractString;
-    mod::Union{Module, Nothing} = nothing,
-    fix::Bool = false,
-    update_baseline::Bool = false,
-)::Tuple{Vector{Finding}, Vector{String}}
+        config::Config,
+        root::AbstractString;
+        mod::Union{Module, Nothing} = nothing,
+        fix::Bool = false,
+        update_baseline::Bool = false,
+    )::Tuple{Vector{Finding}, Vector{String}}
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
     enabled = enabled_rules(config)
@@ -166,8 +166,8 @@ function run_rules(
         )
     end
     return sort!(
-        findings;
-        by = finding -> (finding.site.file, finding.site.line, finding.rule),
-    ),
+            findings;
+            by = finding -> (finding.site.file, finding.site.line, finding.rule),
+        ),
         skipped
 end

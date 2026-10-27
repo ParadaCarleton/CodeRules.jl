@@ -60,18 +60,24 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
     end
 
     @testset "a typo fails loud" begin
-        @test_throws ErrorException load_config(package_tree(
-            "name = \"D\"\n[preferences.Corset]\npedantc = true\n",
-            Pair[],
-        ))
-        @test_throws ErrorException load_config(package_tree(
-            "name = \"D\"\n[preferences.Corset.levels]\nno-such-rule = \"deny\"\n",
-            Pair[],
-        ))
-        @test_throws ErrorException load_config(package_tree(
-            "name = \"D\"\n[preferences.Corset.levels]\nfloat64 = \"loud\"\n",
-            Pair[],
-        ))
+        @test_throws ErrorException load_config(
+            package_tree(
+                "name = \"D\"\n[preferences.Corset]\npedantc = true\n",
+                Pair[],
+            )
+        )
+        @test_throws ErrorException load_config(
+            package_tree(
+                "name = \"D\"\n[preferences.Corset.levels]\nno-such-rule = \"deny\"\n",
+                Pair[],
+            )
+        )
+        @test_throws ErrorException load_config(
+            package_tree(
+                "name = \"D\"\n[preferences.Corset.levels]\nfloat64 = \"loud\"\n",
+                Pair[],
+            )
+        )
         @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny])
     end
 
@@ -199,10 +205,12 @@ end
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)
     @test occursin("float64", first(captured_main(["rules", root, "--pedantic"])))
     @test captured_main(["check", root, "--no-load", "--allow", "no-such-rule"])[2] == 2
-    @test_throws ErrorException Corset.load_package(package_tree(
-        "version = \"1\"\n",
-        Pair[],
-    ))
+    @test_throws ErrorException Corset.load_package(
+        package_tree(
+            "version = \"1\"\n",
+            Pair[],
+        )
+    )
 end
 
 @testset "corset: a rule that reads the package runs it in the project's environment" begin
