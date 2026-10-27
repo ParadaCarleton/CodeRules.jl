@@ -1,5 +1,7 @@
 # Runs the registered rules over a project and judges their sites against the baseline.
 
+using diffutils_jll: diffutils_jll
+
 """One site a rule found, with the level it was found at."""
 struct Finding
     rule::String
@@ -19,7 +21,13 @@ end
 The findings among `sites` of `rule` at `level`: the sites no `# lint:` comment opts out, whose key the
 baseline does not allow. With `update`, the baseline is seeded and lowered as `offenders!` does.
 """
-function judge(repository::Repository, rule::Rule, level::Symbol, sites::AbstractVector{Site}, update::Bool)::Vector{Finding}
+function judge(
+    repository::Repository,
+    rule::Rule,
+    level::Symbol,
+    sites::AbstractVector{Site},
+    update::Bool,
+)::Vector{Finding}
     name = rule_name(rule)
     over = String[]
     if update
@@ -31,14 +39,74 @@ function judge(repository::Repository, rule::Rule, level::Symbol, sites::Abstrac
         kept, _ = unopted(sites, name)
         over = exceeding(allowances(repository, name), tally(kept))
     end
-    return [Finding(name, level, site) for site in first(unopted(sites, name)) if site.key in over]
+    return [
+        Finding(name, level, site)
+        for site in first(unopted(sites, name))
+        if site.key in over
+    ]
 end
 
 """The names of the rules in `rules` that read the loaded package."""
-module_rule_names(rules::Tuple)::Vector{String} = [rule_name(rule) for rule in rules if rule isa ModuleRule]
+module_rule_names(rules::Tuple)::Vector{String} = [
+    rule_name(rule)
+    for rule in rules
+    if rule isa ModuleRule
+]
 
 """The rules `config` leaves on."""
-enabled_rules(config::Config)::Tuple = Tuple(rule for rule in RULES if level(config, rule) !== :allow)
+enabled_rules(config::Config)::Tuple = Tuple(
+    rule
+    for rule in RULES
+    if level(config, rule) !== :allow
+)
+
+"""Run the fixer of every fixable rule in `rules` over the files `context` names."""
+function apply_fixes!(rules::Tuple, context::Context)::Nothing
+    for rule in rules
+        if fixable(rule)
+            fix!(rule, context)
+        end
+    end
+    return nothing
+end
+
+"""The unified diff from the file `before` to the file `after`, labeled `label`; empty when they match."""
+function file_diff(
+    label::AbstractString,
+    before::AbstractString,
+    after::AbstractString,
+)::String
+    return read(
+        ignorestatus(
+            `$(diffutils_jll._diff()) -u --label a/$label --label b/$label $before $after`,
+        ),
+        String,
+    )
+end
+
+"""
+    fix_diff(config, root)
+
+The unified diff of the rewrites `--fix` would make, computed on a copy of the source directories.
+The tree at `root` is not written.
+"""
+function fix_diff(config::Config, root::AbstractString)::String
+    original = repository(config, root)
+    directories = present_directories(original, config.directories)
+    copies = mktempdir()
+    for directory in directories
+        cp(joinpath(original.root, directory), joinpath(copies, directory))
+    end
+    apply_fixes!(
+        enabled_rules(config),
+        Context(repository(config, copies), directories, nothing, Inferred[]),
+    )
+    labels = relpath.(repository_sources(original, directories), original.root)
+    return join(
+        file_diff(label, joinpath(original.root, label), joinpath(copies, label))
+        for label in labels
+    )
+end
 
 """
     run_rules(config, root; mod = nothing, fix = false, update_baseline = false)
@@ -49,19 +117,19 @@ for the rules that have a fixer. `update_baseline` seeds and lowers the baseline
 baseline is only read.
 """
 function run_rules(
-        config::Config, root::AbstractString; mod::Union{Module, Nothing} = nothing, fix::Bool = false, update_baseline::Bool = false,
-    )::Tuple{Vector{Finding}, Vector{String}}
+    config::Config,
+    root::AbstractString;
+    mod::Union{Module, Nothing} = nothing,
+    fix::Bool = false,
+    update_baseline::Bool = false,
+)::Tuple{Vector{Finding}, Vector{String}}
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
     enabled = enabled_rules(config)
     runnable = Tuple(rule for rule in enabled if !(rule isa ModuleRule) || !isnothing(mod))
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
-        for rule in runnable
-            if fixable(rule)
-                fix!(rule, Context(repository_, directories, mod, Inferred[]))
-            end
-        end
+        apply_fixes!(runnable, Context(repository_, directories, mod, Inferred[]))
     end
     needs_inferred = any(rule -> rule isa AbstractLocalRule || rule isa BangRule, runnable)
     inferred = Inferred[]
@@ -86,7 +154,20 @@ function run_rules(
     end
     findings = Finding[]
     for rule in runnable
-        append!(findings, judge(repository_, rule, level(config, rule), sites[rule_name(rule)], update_baseline))
+        append!(
+            findings,
+            judge(
+                repository_,
+                rule,
+                level(config, rule),
+                sites[rule_name(rule)],
+                update_baseline,
+            ),
+        )
     end
-    return sort!(findings; by = finding -> (finding.site.file, finding.site.line, finding.rule)), skipped
+    return sort!(
+        findings;
+        by = finding -> (finding.site.file, finding.site.line, finding.rule),
+    ),
+        skipped
 end

@@ -10,6 +10,7 @@ JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+diffutils_jll = "11f5bf75-d780-529b-b59b-a3a04c974070"
 
 [compat]
 ArgParse = "1"
@@ -18,6 +19,7 @@ JSON = "1"
 PrecompileTools = "1"
 TOML = "1"
 Test = "1"
+diffutils_jll = "3.12.0"
 julia = "1.13"
 
 [apps.corset]

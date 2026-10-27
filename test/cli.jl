@@ -1,7 +1,19 @@
 # The `corset` command: configuration, rule levels, output and exit codes.
 
-using Corset: Corset, Finding, RULES, exit_code, level, load_config, print_findings, print_rules, project_root,
-    rule_group, rule_name, run_rules, with_overrides
+using Corset:
+    Corset,
+    Finding,
+    RULES,
+    exit_code,
+    level,
+    load_config,
+    print_findings,
+    print_rules,
+    project_root,
+    rule_group,
+    rule_name,
+    run_rules,
+    with_overrides
 
 """A package tree under a fresh directory with the `Project.toml` text `project`, and the files `files`."""
 function package_tree(project::AbstractString, files::AbstractVector{<:Pair})::String
@@ -35,7 +47,10 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
     @testset "Project.toml preferences, overlaid by LocalPreferences.toml key by key" begin
         root = package_tree(
             "name = \"Demo\"\n[preferences.Corset]\npedantic = true\nbaseline = \"base.toml\"\n[preferences.Corset.levels]\nfloat64 = \"deny\"\n",
-            ["LocalPreferences.toml" => "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n"],
+            [
+                "LocalPreferences.toml" =>
+                    "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n",
+            ],
         )
         config = load_config(root)
         @test !config.pedantic
@@ -45,9 +60,18 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
     end
 
     @testset "a typo fails loud" begin
-        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\npedantc = true\n", Pair[]))
-        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset.levels]\nno-such-rule = \"deny\"\n", Pair[]))
-        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset.levels]\nfloat64 = \"loud\"\n", Pair[]))
+        @test_throws ErrorException load_config(package_tree(
+            "name = \"D\"\n[preferences.Corset]\npedantc = true\n",
+            Pair[],
+        ))
+        @test_throws ErrorException load_config(package_tree(
+            "name = \"D\"\n[preferences.Corset.levels]\nno-such-rule = \"deny\"\n",
+            Pair[],
+        ))
+        @test_throws ErrorException load_config(package_tree(
+            "name = \"D\"\n[preferences.Corset.levels]\nfloat64 = \"loud\"\n",
+            Pair[],
+        ))
         @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny])
     end
 
@@ -63,36 +87,78 @@ end
 @testset "corset: running the rules" begin
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     findings, skipped = run_rules(load_config(root), root)
-    @test [(finding.rule, finding.site.line) for finding in findings] == [("where-return", 2)]
+    @test [(finding.rule, finding.site.line) for finding in findings] ==
+        [("where-return", 2)]
     @test "hidden-input" in skipped
 
     @testset "a # lint: comment opts a site out" begin
-        opted = package_tree("name = \"Demo\"\n", ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x # lint: where-return\nend\n"])
+        opted = package_tree(
+            "name = \"Demo\"\n",
+            [
+                "src/Demo.jl" =>
+                    "module Demo\nf(x::T)::T where {T} = x # lint: where-return\nend\n",
+            ],
+        )
         @test isempty(first(run_rules(load_config(opted), opted)))
     end
 
     @testset "a baseline allows today's sites and is read, not written" begin
-        baselined = package_tree("name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n", [SOURCE_TREE; "base.toml" => "[where-return]\n\"Demo.jl\" = 1\n"])
+        baselined = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n",
+            [SOURCE_TREE; "base.toml" => "[where-return]\n\"Demo.jl\" = 1\n"],
+        )
         before = read(joinpath(baselined, "base.toml"), String)
         @test isempty(first(run_rules(load_config(baselined), baselined)))
         @test read(joinpath(baselined, "base.toml"), String) == before
     end
 
     @testset "--update-baseline seeds a missing baseline" begin
-        seeded = package_tree("name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n", SOURCE_TREE)
-        @test_logs (:warn, r"seeded") match_mode = :any run_rules(load_config(seeded), seeded; update_baseline = true)
+        seeded = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n",
+            SOURCE_TREE,
+        )
+        @test_logs (:warn, r"seeded") match_mode = :any run_rules(
+            load_config(seeded),
+            seeded;
+            update_baseline = true,
+        )
         @test occursin("where-return", read(joinpath(seeded, "base.toml"), String))
     end
 
     @testset "--fix rewrites the file for the rules that have a fixer" begin
         fixed = package_tree("name = \"Demo\"\n", SOURCE_TREE)
         @test isempty(first(run_rules(load_config(fixed), fixed; fix = true)))
-        @test occursin("(f(x::T)::T) where {T}", read(joinpath(fixed, "src", "Demo.jl"), String))
+        @test occursin(
+            "(f(x::T)::T) where {T}",
+            read(joinpath(fixed, "src", "Demo.jl"), String),
+        )
+    end
+
+    @testset "--diff shows the --fix rewrite and writes nothing" begin
+        previewed = package_tree("name = \"Demo\"\n", SOURCE_TREE)
+        before = read(joinpath(previewed, "src", "Demo.jl"), String)
+        output, code = captured_main(["check", previewed, "--diff"])
+        @test code == 1
+        @test occursin("--- a/src/Demo.jl", output)
+        @test occursin("+(f(x::T)::T) where {T}", output)
+        @test read(joinpath(previewed, "src", "Demo.jl"), String) == before
+
+        clean = package_tree(
+            "name = \"Demo\"\n",
+            ["src/Demo.jl" => "module Demo\ng(x) = x\nend\n"],
+        )
+        @test captured_main(["check", clean, "--diff"]) == ("", Cint(0))
+        @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
     @testset "module rules run on a loaded package" begin
-        findings, skipped = run_rules(with_overrides(load_config(root), false, ["hidden-input" => :deny]), root; mod = Corset.WorkloadPackage)
-        @test ("hidden-input", :deny) in [(finding.rule, finding.level) for finding in findings]
+        findings, skipped = run_rules(
+            with_overrides(load_config(root), false, ["hidden-input" => :deny]),
+            root;
+            mod = Corset.WorkloadPackage,
+        )
+        @test ("hidden-input", :deny) in
+            [(finding.rule, finding.level) for finding in findings]
         @test isempty(skipped)
     end
 end
@@ -102,9 +168,19 @@ end
     findings, _ = run_rules(load_config(root), root)
     human = sprint(print_findings, root, findings, "human")
     @test human == "warn[where-return]: Demo.jl\n  --> src/Demo.jl:2\n"
-    @test sprint(print_findings, root, findings, "concise") == "src/Demo.jl:2: warn: [where-return] Demo.jl\n"
-    @test occursin("\"rule\":\"where-return\"", sprint(print_findings, root, findings, "json"))
-    @test sprint(print_findings, root, [Finding("jet", :deny, Corset.Site("scope", "", 0))], "human") == "deny[jet]: scope\n"
+    @test sprint(print_findings, root, findings, "concise") ==
+        "src/Demo.jl:2: warn: [where-return] Demo.jl\n"
+    @test occursin(
+        "\"rule\":\"where-return\"",
+        sprint(print_findings, root, findings, "json"),
+    )
+    @test sprint(
+        print_findings,
+        root,
+        [Finding("jet", :deny, Corset.Site("scope", "", 0))],
+        "human",
+    ) ==
+        "deny[jet]: scope\n"
 
     @test exit_code(findings, false) == 0
     @test exit_code(findings, true) == 1
@@ -123,13 +199,19 @@ end
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)
     @test occursin("float64", first(captured_main(["rules", root, "--pedantic"])))
     @test captured_main(["check", root, "--no-load", "--allow", "no-such-rule"])[2] == 2
-    @test_throws ErrorException Corset.load_package(package_tree("version = \"1\"\n", Pair[]))
+    @test_throws ErrorException Corset.load_package(package_tree(
+        "version = \"1\"\n",
+        Pair[],
+    ))
 end
 
 @testset "corset: a rule that reads the package runs it in the project's environment" begin
     project = package_tree(
         "name = \"Demo\"\nuuid = \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\n",
-        ["src/Demo.jl" => "module Demo\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nend\n"],
+        [
+            "src/Demo.jl" =>
+                "module Demo\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nend\n",
+        ],
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) -e "using Corset; exit(Corset.main(ARGS))" -- check $project --format concise --deny hidden-input`
     process = run(pipeline(ignorestatus(command); stdout = joinpath(project, "out.txt")))
