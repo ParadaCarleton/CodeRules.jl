@@ -132,6 +132,38 @@ function logged_over(rule::String, measured::AbstractDict{String, Int}, over::Ab
     return over
 end
 
+"""The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
+function unopted(sites::AbstractVector{Site}, rule::AbstractString)::Tuple{Vector{Site}, Int}
+    skips = Dict{String, OptOuts}()
+    kept = Site[]
+    for site in sites
+        if !haskey(skips, site.file)
+            skips[site.file] = opt_outs(site.file, rule)
+        end
+        if !(skips[site.file].whole_file || any(in(skips[site.file].lines), site.line:site.last_line))
+            push!(kept, site)
+        end
+    end
+    return kept, length(sites) - length(kept)
+end
+
+"""The number of `sites` under each key."""
+function tally(sites::AbstractVector{Site})::Dict{String, Int}
+    measured = Dict{String, Int}()
+    for site in sites
+        measured[site.key] = get(measured, site.key, 0) + 1
+    end
+    return measured
+end
+
+"""The keys of `measured` that baseline table `entries` does not allow: absent from it, or past their count."""
+exceeding(entries::AbstractDict, measured::AbstractDict{String, Int})::Vector{String} =
+    sort!([key for (key, found) in measured if !haskey(entries, key) || exceeds(found, entries[key])])
+
+"""The keys of `entries` under one of `scopes` that `measured` undercuts, so their entry can be lowered."""
+falling(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}})::Vector{String} =
+    sort!([key for (key, entry) in entries if any(startswith(key, scope) for scope in scopes) && remaining(entry, get(measured, key, 0)) != entry])
+
 """
     offenders!(repository, rule, sites; scopes = ("",), fix = "")
 
@@ -148,19 +180,8 @@ the rule accepts.
 function offenders!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
     )::Vector{String}
-    skips = Dict{String, OptOuts}()
-    measured = Dict{String, Int}()
-    opted = 0
-    for site in sites
-        if !haskey(skips, site.file)
-            skips[site.file] = opt_outs(site.file, rule)
-        end
-        if skips[site.file].whole_file || any(in(skips[site.file].lines), site.line:site.last_line)
-            opted += 1
-        else
-            measured[site.key] = get(measured, site.key, 0) + 1
-        end
-    end
+    kept, opted = unopted(sites, rule)
+    measured = tally(kept)
     if opted > 0
         @info "$rule: $opted site(s) opted out by `# lint: $rule`"
     end
@@ -179,8 +200,8 @@ function offenders!(
         return String[]
     end
     entries = baseline[rule]
-    over = sort!([key for (key, found) in measured if !haskey(entries, key) || exceeds(found, entries[key])])
-    improved = sort!([key for (key, entry) in entries if any(startswith(key, scope) for scope in scopes) && remaining(entry, get(measured, key, 0)) != entry])
+    over = exceeding(entries, measured)
+    improved = falling(entries, measured, scopes)
     for key in improved
         left = remaining(entries[key], get(measured, key, 0))
         if left == 0
