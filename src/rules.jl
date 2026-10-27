@@ -255,14 +255,15 @@ end
 
 """
 The concrete signatures `method` was compiled for: its specializations, which the code that ran
-(the test suite) called with real argument types. A method with no type variable is typed over its own
+(the test suite) called with real argument types. A constructor's signature holds `Type{X}`, which is not
+concrete but is a dispatch type, so `isdispatchtuple` keeps it. A method with no type variable is typed over its own
 signature; so is a generic one nothing has called, since a type variable stays abstract.
 """
 function typed_signatures(method::Method)::Vector{Type}
     called = Type[
         instance.specTypes
         for instance in Base.specializations(method)
-        if instance isa Core.MethodInstance && isconcretetype(instance.specTypes)
+        if instance isa Core.MethodInstance && Base.isdispatchtuple(instance.specTypes)
     ]
     if method.sig isa UnionAll && !isempty(called)
         return called
