@@ -1,6 +1,8 @@
 # Per-project settings for the `corset` command, read from the `[preferences.Corset]` table of the
 # project's Project.toml and the `[Corset]` table of its LocalPreferences.toml (which wins per key).
 
+using Configurations: @option, from_dict, FieldTypeConversionError, InvalidKeyError
+
 """
     Config
 
@@ -18,35 +20,53 @@ struct Config
 end
 
 const LEVELS = (:allow, :warn, :deny)
-const CONFIG_KEYS = ("directories", "baseline", "one_letter_exempt", "skipped_directories", "pedantic", "levels")
 
-"""The `[Corset]` preferences of `root`: Project.toml's table overlaid by LocalPreferences.toml's, key by key."""
-function preference_table(root::AbstractString)::Dict{String, Any}
-    table = Dict{String, Any}()
-    project = joinpath(root, "Project.toml")
-    if isfile(project)
-        merge!(table, get(get(TOML.parsefile(project), "preferences", Dict{String, Any}()), "Corset", Dict{String, Any}()))
+"""One `[Corset]` preferences table, as written: a key left out is `nothing`, so a layer overlays another key by key."""
+@option struct Preferences
+    directories::Union{Nothing, Vector{String}} = nothing
+    baseline::Union{Nothing, String} = nothing
+    one_letter_exempt::Union{Nothing, Vector{String}} = nothing
+    skipped_directories::Union{Nothing, Vector{String}} = nothing
+    pedantic::Union{Nothing, Bool} = nothing
+    levels::Union{Nothing, Dict{String, String}} = nothing
+end
+
+"""`over`'s keys where it sets them, else `under`'s."""
+overlay(under::Preferences, over::Preferences)::Preferences =
+    Preferences((something(getfield(over, name), getfield(under, name), Some(nothing)) for name in fieldnames(Preferences))...)
+
+"""The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""
+function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences
+    if !isfile(file)
+        return Preferences()
     end
-    local_file = joinpath(root, "LocalPreferences.toml")
-    if isfile(local_file)
-        merge!(table, get(TOML.parsefile(local_file), "Corset", Dict{String, Any}()))
+    table = TOML.parsefile(file)
+    for name in path
+        table = get(table, name, Dict{String, Any}())
     end
-    return table
+    try
+        return from_dict(Preferences, table)
+    catch error_
+        if error_ isa Union{InvalidKeyError, FieldTypeConversionError}
+            error("[$(join(path, "."))] in $file: $(sprint(showerror, error_))")
+        end
+        rethrow()
+    end
 end
 
 """
     load_config(root)
 
-The `Config` of the project at `root`. An unknown key, an unknown rule name or a level other than
-`allow`, `warn` or `deny` throws, so a typo cannot silently switch a rule off.
+The `Config` of the project at `root`: the `[preferences.Corset]` table of its Project.toml overlaid by
+the `[Corset]` table of its LocalPreferences.toml, key by key. An unknown key, an unknown rule name or a
+level other than `allow`, `warn` or `deny` throws, so a typo cannot silently switch a rule off.
 """
 function load_config(root::AbstractString)::Config
-    table = preference_table(root)
-    unknown = setdiff(keys(table), CONFIG_KEYS)
-    if !isempty(unknown)
-        error("unknown [preferences.Corset] key(s) $(sort!(collect(unknown))); known keys are $(join(CONFIG_KEYS, ", "))")
-    end
-    levels = Dict{String, Symbol}(rule => Symbol(level) for (rule, level) in get(table, "levels", Dict{String, Any}()))
+    prefs = overlay(
+        read_preferences(joinpath(root, "Project.toml"), ("preferences", "Corset")),
+        read_preferences(joinpath(root, "LocalPreferences.toml"), ("Corset",)),
+    )
+    levels = Dict{String, Symbol}(rule => Symbol(level) for (rule, level) in something(prefs.levels, Dict{String, String}()))
     for (rule, level) in levels
         if rule ∉ rule_name.(RULES)
             error("[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))")
@@ -56,11 +76,11 @@ function load_config(root::AbstractString)::Config
         end
     end
     return Config(
-        Tuple(String.(get(table, "directories", ["src"]))),
-        get(table, "baseline", nothing),
-        Tuple(Symbol.(get(table, "one_letter_exempt", String[]))),
-        Tuple(String.(get(table, "skipped_directories", String[]))),
-        get(table, "pedantic", false),
+        Tuple(something(prefs.directories, ["src"])),
+        prefs.baseline,
+        Tuple(Symbol.(something(prefs.one_letter_exempt, String[]))),
+        Tuple(something(prefs.skipped_directories, String[])),
+        something(prefs.pedantic, false),
         levels,
     )
 end

@@ -10,11 +10,11 @@ struct Finding
 end
 
 """The allowances the baseline file of `repository` holds for `rule`: none when there is no file or no table."""
-function allowances(repository::Repository, rule::AbstractString)::Dict{String, Any}
+function allowances(repository::Repository, rule::AbstractString)::Dict{String, Union{Int, String}}
     if isnothing(repository.baseline) || !isfile(repository.baseline)
-        return Dict{String, Any}()
+        return Dict{String, Union{Int, String}}()
     end
-    return get(TOML.parsefile(repository.baseline), rule, Dict{String, Any}())
+    return get(read_baseline(repository.baseline), rule, Dict{String, Union{Int, String}}())
 end
 
 """The keys of `sites` that the baseline of `repository` does not allow for `rule`; with `update`, it is seeded and lowered as `offenders!` does."""
