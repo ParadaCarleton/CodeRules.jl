@@ -1,11 +1,22 @@
 # JET reports as ratchet sites: each report is one site, keyed by the scope (the testset's
 # analysis), the function it was found in and the report's kind, and placed at the source line of
 # the frame where JET raised it, so the `jet` rule's opt-out comment on that line takes it out.
+# Corset does not depend on JET: the macros use the JET the caller has loaded, so `corset` itself
+# never pays for loading it.
 
-using JET: JET
+const JET_ID = Base.PkgId(Base.UUID("c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"), "JET")
+
+"""The `JET` module the caller has loaded; throws when none is, naming the fix."""
+function loaded_jet()::Module
+    jet = get(Base.loaded_modules, JET_ID, nothing)
+    if isnothing(jet)
+        error("`@call_sites` and `@opt_sites` use the caller's JET: add `using JET` before them")
+    end
+    return jet
+end
 
 """The `Site` of JET report `report`: its innermost frame names the function and the line."""
-function jet_site(scope::String, report::JET.InferenceErrorReport)::Site
+function jet_site(scope::String, report::Any)::Site
     frame = last(report.vst)
     method = frame.linfo.def
     name = method isa Method ? method.name : :top_level
@@ -13,11 +24,11 @@ function jet_site(scope::String, report::JET.InferenceErrorReport)::Site
 end
 
 """One site per report of JET analysis `result`."""
-jet_sites(scope::String, result::JET.JETCallResult)::Vector{Site} = [jet_site(scope, report) for report in JET.get_reports(result)]
+jet_sites(scope::String, result::Any)::Vector{Site} = [jet_site(scope, report) for report in Base.invokelatest(loaded_jet().get_reports, result)]
 
 """The code of `@call_sites` and `@opt_sites`: `sites` gains the sites of `report_macro` run on `arguments`."""
 function jet_assertion(report_macro::Symbol, scope::String, source::LineNumberNode, sites::Symbol, arguments::Tuple)::Expr
-    analysis = esc(Expr(:macrocall, GlobalRef(JET, report_macro), source, arguments...))
+    analysis = esc(Expr(:macrocall, GlobalRef(loaded_jet(), report_macro), source, arguments...))
     return :(append!($(esc(sites)), jet_sites($scope, $analysis)))
 end
 
