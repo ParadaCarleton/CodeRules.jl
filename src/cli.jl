@@ -186,10 +186,12 @@ function print_findings(
 )::Nothing
     if format == "json"
         records = [
-            (; rule = finding.rule, level = finding.level, key = finding.site.key, file = display_path(
-                root,
-                finding.site,
-            ), line = finding.site.line)
+            (;
+                rule = finding.rule, level = finding.level, key = finding.site.key, file = display_path(
+                    root,
+                    finding.site,
+                ), line = finding.site.line,
+            )
             for finding in findings
         ]
         json = Base.require(@__MODULE__, :JSON)
