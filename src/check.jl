@@ -17,6 +17,18 @@ function allowances(repository::Repository, rule::AbstractString)::Dict{String, 
     return get(TOML.parsefile(repository.baseline), rule, Dict{String, Any}())
 end
 
+"""The keys of `sites` that the baseline of `repository` does not allow for `rule`; with `update`, it is seeded and lowered as `offenders!` does."""
+function disallowed_keys(repository::Repository, rule::AbstractString, sites::AbstractVector{Site}, update::Bool)::Vector{String}
+    if update
+        if !isnothing(repository.baseline) && !isfile(repository.baseline)
+            touch(repository.baseline)
+        end
+        return offenders!(repository, rule, sites)
+    end
+    kept, _ = unopted(sites, rule)
+    return exceeding(allowances(repository, rule), tally(kept))
+end
+
 """
 The findings among `sites` of `rule` at `level`: the sites no `# lint:` comment opts out, whose key the
 baseline does not allow. With `update`, the baseline is seeded and lowered as `offenders!` does.
@@ -29,16 +41,7 @@ function judge(
         update::Bool,
     )::Vector{Finding}
     name = rule_name(rule)
-    over = String[]
-    if update
-        if !isnothing(repository.baseline) && !isfile(repository.baseline)
-            touch(repository.baseline)
-        end
-        over = offenders!(repository, name, sites)
-    else
-        kept, _ = unopted(sites, name)
-        over = exceeding(allowances(repository, name), tally(kept))
-    end
+    over = disallowed_keys(repository, name, sites, update)
     return [
         Finding(name, level, site)
             for site in first(unopted(sites, name))

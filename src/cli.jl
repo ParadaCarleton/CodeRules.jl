@@ -245,7 +245,7 @@ function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)
 end
 
 """Run `corset check` for parsed `arguments` (from the command line `args`); returns the exit code."""
-function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractString})::Cint
+function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
     root = project_root(arguments["path"])
     config = with_overrides(
         load_config(root),
@@ -253,7 +253,7 @@ function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractStrin
         level_overrides(arguments),
     )
     if arguments["diff"]
-        return print_fix_diff(stdout, config, root, arguments["fix"])
+        return print_fix_diff(out, config, root, arguments["fix"])
     end
     loads = reads_package(config) && !arguments["no-load"]
     if loads && !haskey(ENV, INNER_VARIABLE)
@@ -270,9 +270,9 @@ function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractStrin
         fix = arguments["fix"],
         update_baseline = arguments["update-baseline"],
     )
-    print_findings(stdout, root, findings, arguments["format"])
+    print_findings(out, root, findings, arguments["format"])
     if !isempty(skipped)
-        println(stderr, "skipped (they read the loaded package): ", join(skipped, ", "))
+        println(err, "skipped (they read the loaded package): ", join(skipped, ", "))
     end
     return exit_code(findings, arguments["deny-warnings"])
 end
@@ -281,12 +281,12 @@ end
 broken_pipe(error_::Any)::Bool = error_ isa Base.IOError && error_.code == Base.UV_EPIPE
 
 """
-    main(args)
+    run_command(args, out, err)
 
-The `corset` command. Returns the exit code: 0 when clean, 1 when a finding fails the run, 2 on a usage or
-configuration error.
+The `corset` command on the streams `out` and `err`. Returns the exit code: 0 when clean, 1 when a
+finding fails the run, 2 on a usage or configuration error.
 """
-function (@main)(args::AbstractVector{<:AbstractString})::Cint
+function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
     try
         parsed = parse_args(collect(String, args), argument_settings())
         command = parsed["%COMMAND%"]
@@ -297,18 +297,21 @@ function (@main)(args::AbstractVector{<:AbstractString})::Cint
                 arguments["pedantic"],
                 Pair{String, Symbol}[],
             )
-            print_rules(stdout, config)
+            print_rules(out, config)
             return Cint(0)
         end
-        return run_check(parsed["check"], args)
+        return run_check(parsed["check"], args, out, err)
     catch error_
         if broken_pipe(error_)
             return Cint(0)
         end
         if error_ isa ErrorException
-            println(stderr, "corset: ", error_.msg)
+            println(err, "corset: ", error_.msg)
             return Cint(2)
         end
         rethrow()
     end
 end
+
+"""`run_command` on the process's standard streams, as they are when the command starts."""
+(@main)(args::AbstractVector{<:AbstractString})::Cint = run_command(args, stdout, stderr) # lint: hidden-input
