@@ -227,6 +227,20 @@ end
     @test occursin("hidden-input] COUNTER", read(joinpath(project, "out.txt"), String))
 end
 
+@testset "corset: every pedantic rule reports on a source that breaks it" begin
+    root = mktempdir()
+    fixture = load_fixture(joinpath(root, "src"))
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "annotation", "one-letter")), "\n")
+    write(joinpath(root, "src", "smells.jl"), smells)
+    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
+    config = with_overrides(load_config(root), true, ["fatou" => :allow])
+    findings, skipped = run_rules(config, root; mod = fixture)
+    @test isempty(skipped)
+    reporting = Set(finding.rule for finding in findings)
+    pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic && rule_name(rule) != "fatou"]
+    @test setdiff(pedantic, reporting) == String[]
+end
+
 @testset "corset: a closed output pipe ends the run quietly" begin
     @test Corset.broken_pipe(Base.IOError("write", Base.UV_EPIPE))
     @test !Corset.broken_pipe(Base.IOError("write", Base.UV_EIO))
