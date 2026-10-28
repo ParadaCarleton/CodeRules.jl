@@ -317,23 +317,35 @@ end
 
 @testset "concrete-return: a package struct parameterized by a `where` variable is generic" begin
     scope = Module(:ReturnScope)
-    Core.eval(scope, :(struct Wrapped{E}
-        inner::E
-    end))
+    Core.eval(
+        scope, :(
+            struct Wrapped{E}
+                inner::E
+            end
+        )
+    )
+    Core.eval(
+        scope, :(
+            struct Set{E}
+                inner::E
+            end
+        )
+    )
     check(text::String) = (
         path = tempname() * ".jl";
         write(path, text);
         length(concrete_returns(path, located_source(path), scope))
     )
-    @test check("(wrap(value::E)::Wrapped{E}) where {E} = Wrapped(value)\n") == 0
-    @test check("(wrap(value::E)::Wrapped{E}) where {E <: Real} = Wrapped(value)\n") == 0
-    @test check("function wrap(value::E)::Wrapped{E} where {E}\n    return Wrapped(value)\nend\n") == 0
-    @test check("(wrap(values::AbstractVector{E})::Wrapped{Vector{E}}) where {E} = Wrapped(collect(values))\n") == 0
-    @test check("(wrap(value::E)::Union{Nothing, Wrapped{E}}) where {E} = Wrapped(value)\n") == 0
-    @test check("wrap(value::Float32)::Wrapped{Float32} = Wrapped(value)\n") == 1
-    @test check("wrap(value::Float32)::Wrapped = Wrapped(value)\n") == 1
-    @test check("(wrap(value::Float32)::Wrapped{E}) where {T} = Wrapped(value)\n") == 1
-    @test check("(listed(value::E)::Vector{E}) where {E} = [value]\n") == 1
+    @test check("(wrap(element::E)::Wrapped{E}) where {E} = Wrapped(element)\n") == 0
+    @test check("(wrap(element::E)::Set{E}) where {E} = Set(element)\n") == 0
+    @test check("(wrap(element::E)::Wrapped{E}) where {E <: Real} = Wrapped(element)\n") == 0
+    @test check("function wrap(element::E)::Wrapped{E} where {E}\n    return Wrapped(element)\nend\n") == 0
+    @test check("(wrap(elements::AbstractVector{E})::Wrapped{Vector{E}}) where {E} = Wrapped(collect(elements))\n") == 0
+    @test check("(wrap(element::E)::Union{Nothing, Wrapped{E}}) where {E} = Wrapped(element)\n") == 0
+    @test check("wrap(element::Float32)::Wrapped{Float32} = Wrapped(element)\n") == 1
+    @test check("wrap(element::Float32)::Wrapped = Wrapped(element)\n") == 1
+    @test check("(wrap(element::Float32)::Wrapped{E}) where {T} = Wrapped(element)\n") == 1
+    @test check("(listed(element::E)::Vector{E}) where {E} = [element]\n") == 1
 end
 
 @testset "a name used only inside a macro call counts as used" begin

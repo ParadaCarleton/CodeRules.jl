@@ -1022,16 +1022,22 @@ function names_concrete_type(annotation::Expr, scope::Module, variables::Any = (
         return false
     end
     head = first(annotation.args)
-    if package_type(head) && mentions_variable(Expr(:tuple, annotation.args[2:end]...), variables)
+    if package_type(head, scope) &&mentions_variable(Expr(:tuple, annotation.args[2:end]...), variables)
         return false
     end
     return names_concrete_type(head, scope, variables)
 end
 names_concrete_type(::Any, ::Module, ::Any = ())::Bool = false
 
-"""Whether type name `head` is a package's own, which Base does not define."""
-package_type(head::Symbol)::Bool = !isdefined(Base, head)
-package_type(::Any)::Bool = false
+"""Whether type name `head` resolves in `scope` to a type that neither Base nor Core defines."""
+function package_type(head::Symbol, scope::Module)::Bool
+    if !isdefined(scope, head)
+        return false
+    end
+    named = getglobal(scope, head)
+    return named isa Type && !(parentmodule(named) in (Base, Core))
+end
+package_type(::Any, ::Module)::Bool = false
 
 """Whether parsed type expression `parameter` mentions one of the type variables `variables`, at any depth."""
 mentions_variable(parameter::Symbol, variables::Any)::Bool = parameter in variables
