@@ -36,10 +36,12 @@ merged(under::Dict, over::Dict)::Dict = merge(under, over)
 merged(under::Any, over::Any)::Any = something(over, under, Some(nothing))
 
 """`over`'s keys where it sets them, else `under`'s; nested dictionaries are merged."""
-overlay(under::Preferences, over::Preferences)::Preferences = Preferences((
-    merged(getfield(under, name), getfield(over, name))
-    for name in fieldnames(Preferences)
-)...)
+overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
+    (
+        merged(getfield(under, name), getfield(over, name))
+            for name in fieldnames(Preferences)
+    )...
+)
 
 """The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""
 function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences
@@ -74,7 +76,7 @@ function load_config(root::AbstractString)::Config
     )
     levels = Dict{String, Symbol}(
         rule => Symbol(level)
-        for (rule, level) in something(prefs.levels, Dict{String, String}())
+            for (rule, level) in something(prefs.levels, Dict{String, String}())
     )
     for (rule, level) in levels
         if rule ∉ rule_name.(RULES)
