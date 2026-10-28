@@ -15,7 +15,7 @@ option!(settings::ArgParseSettings, name::AbstractString; options...)::Nothing =
 
 """The command's argument table."""
 function argument_settings()::ArgParseSettings
-    settings = ArgParseSettings(;
+    settings::ArgParseSettings = ArgParseSettings(;
         prog = "corset",
         description = "Code-quality rules for Julia packages.",
         add_version = true,
@@ -42,7 +42,7 @@ function argument_settings()::ArgParseSettings
             action = :store_true,
         )
     end
-    check = settings["check"]
+    check::ArgParseSettings = settings["check"]
     option!(
         check,
         "--format";
@@ -101,11 +101,11 @@ function with_overrides(
         pedantic::Bool,
         overrides::AbstractVector{<:Pair{String, Symbol}},
     )::Config
-    levels = merge(config.levels, Dict(overrides))
-    unknown = setdiff(keys(levels), rule_name.(RULES))
+    levels::Dict{String, Symbol} = merge(config.levels, Dict{String, Symbol}(overrides))
+    unknown::Vector{String} = sort!(setdiff(collect(keys(levels)), collect(rule_name.(RULES))))
     if !isempty(unknown)
         error(
-            "no such rule: $(join(sort!(collect(unknown)), ", ")); `corset rules` lists them",
+            "no such rule: $(join(unknown, ", ")); `corset rules` lists them",
         )
     end
     return Config(
@@ -118,13 +118,49 @@ function with_overrides(
     )
 end
 
-"""The `rule => level` pairs the `--allow`, `--warn` and `--deny` options of parsed `arguments` name."""
-function level_overrides(arguments::AbstractDict)::Vector{Pair{String, Symbol}}
-    return [
-        rule => Symbol(name)
-            for name in ("allow", "warn", "deny")
-            for rule in something(arguments[name], String[])
-    ]
+"""The options of `corset rules`."""
+struct RulesOptions
+    path::String
+    pedantic::Bool
+end
+
+"""The options of `corset check`, as ArgParse parsed them; `overrides` are the `rule => level` pairs of `--allow`, `--warn` and `--deny`."""
+struct CheckOptions
+    path::String
+    pedantic::Bool
+    format::String
+    fix::Bool
+    diff::Bool
+    deny_warnings::Bool
+    update_baseline::Bool
+    no_load::Bool
+    overrides::Vector{Pair{String, Symbol}}
+end
+
+function CheckOptions(arguments::AbstractDict)::CheckOptions
+    return CheckOptions(
+        arguments["path"],
+        arguments["pedantic"],
+        arguments["format"],
+        arguments["fix"],
+        arguments["diff"],
+        arguments["deny-warnings"],
+        arguments["update-baseline"],
+        arguments["no-load"],
+        Pair{String, Symbol}[
+            rule => Symbol(name)
+                for name in ("allow", "warn", "deny")
+                for rule in something(arguments[name], String[])
+        ],
+    )
+end
+
+"""The typed options of the command ArgParse parsed into `parsed`."""
+function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions}
+    if parsed["%COMMAND%"] == "rules"
+        return RulesOptions(parsed["rules"]["path"], parsed["rules"]["pedantic"])
+    end
+    return CheckOptions(parsed["check"])
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
@@ -135,7 +171,7 @@ reads_package(config::Config)::Bool = any(
 
 """The package at `root`, loaded in the running process."""
 function load_package(root::AbstractString)::Module
-    name = get(TOML.parsefile(joinpath(root, "Project.toml")), "name", nothing)
+    name::Union{String, Nothing} = get(TOML.parsefile(joinpath(root, "Project.toml")), "name", nothing)
     if isnothing(name)
         error(
             "$root/Project.toml names no package; run with --no-load to skip the rules that read one",
@@ -194,7 +230,7 @@ function print_findings(
             )
                 for finding in findings
         ]
-        json = Base.require(@__MODULE__, :JSON)
+        json::Module = Base.require(@__MODULE__, :JSON)
         println(io, Base.invokelatest(json.json, records))
         return nothing
     end
@@ -220,17 +256,12 @@ function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Cint
     return Cint(any(finding -> finding.level === :deny || deny_warnings, findings))
 end
 
+"""The `corset rules` line for `rule`: its name, group, the level `config` gives it, and its summary."""
+rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), 20) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+
 """`corset rules`: one line per rule with its group and the level `config` gives it."""
 function print_rules(io::IO, config::Config)::Nothing
-    for rule in RULES
-        println(
-            io,
-            rpad(rule_name(rule), 20),
-            rpad(rule_group(rule), 10),
-            rpad(level(config, rule), 7),
-            rule_summary(rule),
-        )
-    end
+    foreach(line -> println(io, line), rule_line.(Ref(config), RULES))
     return nothing
 end
 
@@ -244,18 +275,14 @@ function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)
     return Cint(!isempty(changes))
 end
 
-"""Run `corset check` for parsed `arguments` (from the command line `args`); returns the exit code."""
-function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
-    root = project_root(arguments["path"])
-    config = with_overrides(
-        load_config(root),
-        arguments["pedantic"],
-        level_overrides(arguments),
-    )
-    if arguments["diff"]
-        return print_fix_diff(out, config, root, arguments["fix"])
+"""Run `corset check` with `options` (from the command line `args`); returns the exit code."""
+function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
+    root = project_root(options.path)
+    config = with_overrides(load_config(root), options.pedantic, options.overrides)
+    if options.diff
+        return print_fix_diff(out, config, root, options.fix)
     end
-    loads = reads_package(config) && !arguments["no-load"]
+    loads = reads_package(config) && !options.no_load
     if loads && !haskey(ENV, INNER_VARIABLE)
         return relaunch(root, args)
     end
@@ -263,18 +290,19 @@ function run_check(arguments::AbstractDict, args::AbstractVector{<:AbstractStrin
     if loads
         mod = load_package(root)
     end
-    findings, skipped = run_rules(
-        config,
-        root;
-        mod,
-        fix = arguments["fix"],
-        update_baseline = arguments["update-baseline"],
-    )
-    print_findings(out, root, findings, arguments["format"])
+    findings, skipped = run_rules(config, root; mod, fix = options.fix, update_baseline = options.update_baseline)
+    print_findings(out, root, findings, options.format)
     if !isempty(skipped)
         println(err, "skipped (they read the loaded package): ", join(skipped, ", "))
     end
-    return exit_code(findings, arguments["deny-warnings"])
+    return exit_code(findings, options.deny_warnings)
+end
+
+"""Run `corset rules`: print the rules and their levels to `out`."""
+function run_options(options::RulesOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
+    config = with_overrides(load_config(project_root(options.path)), options.pedantic, Pair{String, Symbol}[])
+    print_rules(out, config)
+    return Cint(0)
 end
 
 """Whether `error_` is a write to a closed pipe (`corset rules | head`), which ends the run quietly."""
@@ -288,19 +316,7 @@ finding fails the run, 2 on a usage or configuration error.
 """
 function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
     try
-        parsed = parse_args(collect(String, args), argument_settings())
-        command = parsed["%COMMAND%"]
-        if command == "rules"
-            arguments = parsed["rules"]
-            config = with_overrides(
-                load_config(project_root(arguments["path"])),
-                arguments["pedantic"],
-                Pair{String, Symbol}[],
-            )
-            print_rules(out, config)
-            return Cint(0)
-        end
-        return run_check(parsed["check"], args, out, err)
+        return run_options(command_options(parse_args(collect(String, args), argument_settings())), args, out, err)
     catch error_
         if broken_pipe(error_)
             return Cint(0)
