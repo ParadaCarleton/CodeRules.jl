@@ -270,8 +270,12 @@ end
     end
 
     @testset "misplaced-import: a name used only in a command interpolation counts as used" begin
-        tree = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nusing B: b\nusing C: c\nf() = `echo \$(a.x()) \$b \\\$c \$`\n"])
+        tree = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nusing B: b\nusing C: c\nf() = `echo \$(a.x()) \$b \\\$c`\n"])
         @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["cmd.jl c"]
+        @testset "a `\$` inside single quotes is shell text, not an interpolation" begin
+            quoted = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nf() = `bash -c 'echo \"\$@\" \$a' x`\n"])
+            @test site_keys(misplaced_imports(Repository(quoted), (".",))) == ["cmd.jl a"]
+        end
     end
 
     @testset "hidden-input: a regex constant is not state; a global stream is" begin
