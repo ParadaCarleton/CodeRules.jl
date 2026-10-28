@@ -98,7 +98,7 @@ end
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
     entries = readdir(directory; join = true)
-    entered = [entry for entry in entries if isdir(entry) && !islink(entry) && !startswith(basename(entry), ".") && !(basename(entry) in skipped)]
+    entered::Vector{String} = [entry for entry in entries if isdir(entry) && !islink(entry) && !startswith(basename(entry), ".") && !(basename(entry) in skipped)]
     return vcat([entry for entry in entries if !isdir(entry) && endswith(entry, ".jl")], (file for nested in entered for file in julia_files(nested, skipped))...)
 end
 
@@ -140,7 +140,7 @@ function logged_over(rule::String, measured::AbstractDict{String, Int}, over::Ab
 end
 
 """The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
-function unopted(sites::AbstractVector{Site}, rule::AbstractString)::Tuple{Vector{Site}, Int}
+function unopted(sites::AbstractVector{S}, rule::AbstractString)::Tuple{Vector{Site}, Int} where {S <: Site}
     skips = Dict{String, OptOuts}()
     kept = Site[]
     for site in sites
@@ -155,7 +155,7 @@ function unopted(sites::AbstractVector{Site}, rule::AbstractString)::Tuple{Vecto
 end
 
 """The number of `sites` under each key."""
-function tally(sites::AbstractVector{Site})::Dict{String, Int}
+function tally(sites::AbstractVector{S})::Dict{String, Int} where {S <: Site}
     measured = Dict{String, Int}()
     for site in sites
         measured[site.key] = get(measured, site.key, 0) + 1
