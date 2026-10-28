@@ -248,7 +248,7 @@ function unit_moves(unit::AbstractVector{ImportFile})::Vector{ImportMove}
 end
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
-function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove}
+function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # lint: abstract-local  files have different numbers of units
     known::Dict{String, ImportFile} = Dict(file.path => file for file in files)
     included::Set{String} = Set(path for file in files for path in file.includes)
     units = [unit_files(file.path, known, String[]) for file in files if !(file.path in included)]

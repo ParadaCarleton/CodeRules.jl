@@ -14,7 +14,7 @@ a non-constant binding, a mutable value (a `Ref`, `Dict`, cache, `Array`, `Atomi
 or a `ScopedValue`, whose value depends on the caller's scope rather than the
 arguments. Strings, symbols and regexes are immutable in use.
 """
-function is_hidden_input(binding::GlobalRef)::Bool
+function is_hidden_input(binding::GlobalRef)::Bool # lint: abstract-local  reflects on values of unknown type
     if !isdefined(binding.mod, binding.name)
         return false
     end
@@ -42,7 +42,7 @@ global_reads(node::Any)::Vector{GlobalRef} = GlobalRef[]
 Whether binding `value` is a lowered anonymous function, `do` block or inner function
 (its type name starts with `#`).
 """
-function is_closure_type(value::Any)::Bool
+function is_closure_type(value::Any)::Bool # lint: abstract-local  reflects on values of unknown type
     if !(value isa Type)
         return false
     end
@@ -62,7 +62,7 @@ ponytail: methods `mod` adds to another module's function (`Base.show`, AD rules
 missed; `Base.visit` over the method table finds those but misses closure call methods
 on Julia 1.13 and needs a mutating callback.
 """
-function defined_methods(mod::Module)::Vector{Method}
+function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
     values = [
         getfield(mod, name)
             for name in names(mod; all = true)
@@ -125,7 +125,7 @@ Whether binding `value` is the type of a closure, `do` block, inner or anonymous
 function's type too (`#add_slope!` beside `add_slope!`), and code reaches that function
 through its name, not its type.
 """
-function is_unnamed_function_type(value::Any)::Bool
+function is_unnamed_function_type(value::Any)::Bool # lint: abstract-local  reflects on values of unknown type
     if !is_closure_type(value)
         return false
     end
@@ -148,7 +148,7 @@ of a method that is not itself a closure names, and those a live closure's own c
 closure whose defining method was redefined in this process (by Revise, in a worker reused across
 trees) is a leftover type that no current code reaches, and is not the source's.
 """
-function live_closures(mod::Module, methods::AbstractVector{Method})::Set{Core.TypeName}
+function live_closures(mod::Module, methods::AbstractVector{Method})::Set{Core.TypeName} # lint: abstract-local  lowered IR statements are untyped
     closure_names = closure_type_names(mod)
     created = Dict{Core.TypeName, Set{Core.TypeName}}()
     roots = Set{Core.TypeName}()
@@ -281,7 +281,7 @@ function inferred_methods(mod::Module)::Vector{Inferred}
 end
 
 """The slots of `code` that a `catch` binds, which Julia always types `Any`."""
-function caught_slots(code::Core.CodeInfo)::Set{Int}
+function caught_slots(code::Core.CodeInfo)::Set{Int} # lint: abstract-local  lowered IR statements are untyped
     caught = Set{Int}()
     exceptions = Set{Int}(
         index
@@ -316,7 +316,7 @@ Whether inferred type `inferred` leaves the compiler without a concrete layout: 
 of more than `UNION_SPLIT_LIMIT` types or of any abstract one, or a collection or tuple that holds such
 elements (`Vector{Any}`). `Type{X}` is a value; a local never assigned (`Union{}`) holds nothing.
 """
-function abstract_local_type(inferred::Any)::Bool
+function abstract_local_type(inferred::Any)::Bool # lint: abstract-local  reflects on values of unknown type
     type = Core.Compiler.widenconst(inferred)
     if type === Union{}
         return false
@@ -346,7 +346,7 @@ const UNION_SPLIT_LIMIT = 4
 The first lowered statement of `inferred` that assigns slot `index`: where the variable is introduced,
 placed on its source line (the method's own line when no statement assigns it).
 """
-function slot_line(inferred::Inferred, index::Integer)::Int
+function slot_line(inferred::Inferred, index::Integer)::Int # lint: abstract-local  lowered IR statements are untyped
     for (position, statement) in pairs(inferred.code.code)
         if statement isa Expr &&
                 statement.head === :(=) &&
@@ -422,7 +422,7 @@ Whether `item` is a named function of `repository`, not a closure or another pac
 does not end in `!`: it exists for its effect, so its name says so. A method returning a call to its
 argument (`returns_argument_call`) gets no verdict: its callers' arguments decide its result.
 """
-function is_unmarked_effect(repository::Repository, item::Inferred)::Bool
+function is_unmarked_effect(repository::Repository, item::Inferred)::Bool # lint: abstract-local  lowered IR statements are untyped
     function_type = Base.unwrap_unionall(item.method.sig).parameters[1]
     name = string(item.method.name)
     return item.result === Nothing &&
@@ -440,7 +440,7 @@ Each method of `is_unmarked_effect` whose function has no method that returns a 
 signature however many specializations ran: a function with a `nothing` method beside real ones (a
 dispatch on "off") is not a procedure.
 """
-function unmarked_effects(
+function unmarked_effects( # lint: abstract-local  lowered IR statements are untyped
         repository::Repository,
         inferred::AbstractVector{Inferred},
     )::Vector{Site}
@@ -472,7 +472,7 @@ closure_namers(mod::Module, methods::AbstractVector{Method})::Dict{Core.TypeName
 The method that creates closure type `name`: its namer in `namers` (`closure_namers`), followed out of
 nested closures to the first namer that is not itself a closure.
 """
-function closure_definer(name::Core.TypeName, namers::AbstractDict{Core.TypeName, Method})::Method
+function closure_definer(name::Core.TypeName, namers::AbstractDict{Core.TypeName, Method})::Method # lint: abstract-local  lowered IR statements are untyped
     definer = namers[name]
     outer = callee_name(definer)
     if haskey(namers, outer)
@@ -488,7 +488,7 @@ The site of closure type `type`, created by method `definer` (`closure_definer`)
 and name (`method_key`) because closure type names carry compiler counters. It sits at the closure's call
 method, or at `definer` when that method has no source file (code built without line numbers).
 """
-function closure_site(type::DataType, definer::Method, world::Integer)::Site
+function closure_site(type::DataType, definer::Method, world::Integer)::Site # lint: abstract-local  lowered IR statements are untyped
     matches = Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)
     placed = definer
     if !isempty(matches) && first(matches).method.file !== :none
@@ -566,7 +566,7 @@ Whether `declared` is abstract or has an abstract type among its parameters, at 
 Allowed: `Union`s (small, split by the compiler), `Type{T}`, a struct's own type parameters
 (`Vector{E}` with `E` free), and value parameters (`SVector{16, E}`'s `Tuple{16}`).
 """
-function holds_abstract(declared::Type)::Bool
+function holds_abstract(declared::Type)::Bool # lint: abstract-local  reflects on values of unknown type
     plain = Base.unwrap_unionall(declared)
     abstract_itself = if Base.has_free_typevars(declared) || plain <: Tuple
         plain isa DataType && isabstracttype(plain)
@@ -598,7 +598,7 @@ first word shared by more than half of at least three fields (`continuation_step
 `continuation_theta`, ...: those fields belong in a `ContinuationControls`). `nothing`
 when no word repeats.
 """
-function repeated_prefix(type::DataType)::Union{String, Nothing}
+function repeated_prefix(type::DataType)::Union{String, Nothing} # lint: abstract-local  reflects on values of unknown type
     words = [first_word(name) for name in fieldnames(type) if occursin('_', string(name))]
     own = first_word(nameof(type))
     if own in words
@@ -616,7 +616,7 @@ function repeated_prefix(type::DataType)::Union{String, Nothing}
 end
 
 """The name a parsed function definition `node` defines, or `nothing` when `node` defines none."""
-function defined_name(node::Expr)::Union{Symbol, Nothing}
+function defined_name(node::Expr)::Union{Symbol, Nothing} # lint: abstract-local  Expr nodes hold untyped arguments
     if !(node.head in (:function, :(=))) || isempty(node.args)
         return nothing
     end
@@ -631,7 +631,7 @@ function defined_name(node::Expr)::Union{Symbol, Nothing}
 end
 
 """The declared return type of parsed function definition `node`, or `nothing` when it declares none."""
-function return_annotation(node::Expr)::Any
+function return_annotation(node::Expr)::Any # lint: abstract-local  Expr nodes hold untyped arguments
     signature = node.args[1]
     while signature isa Expr && signature.head === :where
         signature = signature.args[1]
@@ -698,7 +698,7 @@ function definition_line(node::Expr, line::Int)::Int
 end
 
 """The lines of function definition `node`'s signature: from `definition_line` to the line before its body's first statement (one line for `f(x) = …`)."""
-function definition_lines(node::Expr, line::Int)::UnitRange{Int}
+function definition_lines(node::Expr, line::Int)::UnitRange{Int} # lint: abstract-local  Expr nodes hold untyped arguments
     first_line = definition_line(node, line)
     body = length(node.args) >= 2 ? node.args[2] : nothing
     if body isa Expr &&
@@ -711,7 +711,7 @@ function definition_lines(node::Expr, line::Int)::UnitRange{Int}
 end
 
 """The name of the `@testset` that parsed expression `node` opens, or `nothing` when `node` opens none or the name is interpolated."""
-function testset_name(node::Expr)::Union{Symbol, Nothing}
+function testset_name(node::Expr)::Union{Symbol, Nothing} # lint: abstract-local  Expr nodes hold untyped arguments
     if node.head === :macrocall && first(node.args) === Symbol("@testset")
         for argument in node.args
             if argument isa String
@@ -723,7 +723,7 @@ function testset_name(node::Expr)::Union{Symbol, Nothing}
 end
 
 """Every expression below parsed source `node`, each as a `Located`; returns the line the walk ended on."""
-function locate!(
+function locate!( # lint: abstract-local  Expr nodes hold untyped arguments
         found::Vector{Located},
         node::Expr,
         line::Int,
@@ -775,7 +775,7 @@ function nothing_returns(path::AbstractString, located::AbstractVector{Located})
 end
 
 """Overflow and underflow guards, keyed by the function they sit in."""
-function range_guards(path::AbstractString, located::AbstractVector{Located})::Vector{Site}
+function range_guards(path::AbstractString, located::AbstractVector{Located})::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
     sites = Site[]
     for item in located
         if is_range_guard(item.node)
@@ -791,7 +791,7 @@ function range_guards(path::AbstractString, located::AbstractVector{Located})::V
 end
 
 """Statements that repeat an earlier statement of the same block, keyed `definition: statement`. A statement pasted twice runs twice; the same line in two branches is in two blocks and passes."""
-function repeated_statements(
+function repeated_statements( # lint: abstract-local  Expr nodes hold untyped arguments
         path::AbstractString,
         located::AbstractVector{Located},
     )::Vector{Site}
@@ -895,7 +895,7 @@ end
 is_concrete_container(::Any)::Bool = false
 
 """Whether parsed `node` resizes the variable `name`: a call of `push!`, `empty!` or another size-changing function on it."""
-function resizes(node::Expr, name::Symbol)::Bool
+function resizes(node::Expr, name::Symbol)::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if node.head === :call &&
             length(node.args) >= 2 &&
             first(node.args) in RESIZERS &&
@@ -911,7 +911,7 @@ function resizes(node::Expr, name::Symbol)::Bool
 end
 
 """The call a parsed function definition `node` declares, whatever return annotation or `where` clause wraps it, or `nothing`."""
-function signature_call(node::Expr)::Union{Expr, Nothing}
+function signature_call(node::Expr)::Union{Expr, Nothing} # lint: abstract-local  Expr nodes hold untyped arguments
     if !(node.head in (:function, :(=))) || isempty(node.args)
         return nothing
     end
@@ -926,7 +926,7 @@ function signature_call(node::Expr)::Union{Expr, Nothing}
 end
 
 """Each annotated argument below parsed `argument`, as its name (`:_` when unnamed) and annotation, positional or keyword."""
-function annotated_arguments(argument::Expr)::Vector{Tuple{Symbol, Any}}
+function annotated_arguments(argument::Expr)::Vector{Tuple{Symbol, Any}} # lint: abstract-local  Expr nodes hold untyped arguments
     found = Tuple{Symbol, Any}[]
     if argument.head === :(::)
         name = length(argument.args) == 2 ? argument.args[1] : :_
@@ -947,7 +947,7 @@ Arguments annotated with a concrete container (`is_concrete_container`) that the
 resize, one site per argument at the method's signature, keyed by file: `AbstractVector{T}` takes a
 view, an `OffsetArray` or a GPU array, a `Vector{T}` takes none of them.
 """
-function concrete_arguments(path::AbstractString, located::AbstractVector{Located})::Vector{
+function concrete_arguments(path::AbstractString, located::AbstractVector{Located})::Vector{ # lint: abstract-local  Expr nodes hold untyped arguments
         Site,
     }
     sites = Site[]
@@ -984,7 +984,7 @@ except `Nothing`, `Bool`, tuples and `NamedTuple`s (`EXEMPT_RESULT_TYPES`) and e
 `where` `variables` (`Result{E}`, `Result{Vector{E}}`) is generic too: it has no abstract form to name instead.
 Base's own concrete types stay concrete with such a parameter, since `AbstractVector{E}` names `Vector{E}`'s.
 """
-function names_concrete_type(annotation::Symbol, scope::Module, ::Any = ())::Bool
+function names_concrete_type(annotation::Symbol, scope::Module, ::Any = ())::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if annotation in EXEMPT_RESULT_TYPES
         return false
     end
@@ -999,7 +999,7 @@ function names_concrete_type(annotation::Symbol, scope::Module, ::Any = ())::Boo
     end
     return false
 end
-function names_concrete_type(annotation::Expr, scope::Module, variables::Any = ())::Bool
+function names_concrete_type(annotation::Expr, scope::Module, variables::Any = ())::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if annotation.head !== :curly
         return false
     end
@@ -1020,7 +1020,7 @@ end
 names_concrete_type(::Any, ::Module, ::Any = ())::Bool = false
 
 """Whether type name `head` resolves in `scope` to a type that neither Base nor Core defines."""
-function package_type(head::Symbol, scope::Module)::Bool
+function package_type(head::Symbol, scope::Module)::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if !isdefined(scope, head)
         return false
     end
@@ -1031,7 +1031,7 @@ package_type(::Any, ::Module)::Bool = false
 
 """Whether parsed type expression `parameter` mentions one of the type variables `variables`, at any depth."""
 mentions_variable(parameter::Symbol, variables::Any)::Bool = parameter in variables
-function mentions_variable(parameter::Expr, variables::Any)::Bool
+function mentions_variable(parameter::Expr, variables::Any)::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     for argument in parameter.args
         if mentions_variable(argument, variables)
             return true
@@ -1042,7 +1042,7 @@ end
 mentions_variable(::Any, ::Any)::Bool = false
 
 """The type variables parsed function definition `node` binds in its `where` clauses (`T` of `T <: Real` included)."""
-function where_variables(node::Expr)::Vector{Symbol}
+function where_variables(node::Expr)::Vector{Symbol} # lint: abstract-local  Expr nodes hold untyped arguments
     variables = Symbol[]
     signature = node.args[1]
     while signature isa Expr && signature.head in (:where, :(::))
