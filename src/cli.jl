@@ -315,8 +315,10 @@ end
 """Whether `error_` is a write to a closed pipe (`corset rules | head`), which ends the run quietly."""
 broken_pipe(error_::Any)::Bool = error_ isa Base.IOError && error_.code == Base.UV_EPIPE
 
+"""The message `corset` prints for a usage or configuration error."""
 error_message(error_::ErrorException)::String = error_.msg
 error_message(error_::ArgParseError)::String = error_.text
+error_message(error_::TOML.ParserError)::String = sprint(showerror, error_)
 
 """
     run_command(args, out, err)
@@ -331,7 +333,7 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
         if broken_pipe(error_)
             return 0
         end
-        if error_ isa Union{ErrorException, ArgParseError}
+        if error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
             println(err, "corset: ", error_message(error_))
             return 2
         end

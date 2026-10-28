@@ -270,6 +270,13 @@ end
     @test !Corset.broken_pipe(ErrorException("other"))
 end
 
+@testset "corset: a malformed Project.toml exits with 2" begin
+    root = package_tree("name = \n", ["src/Demo.jl" => "module Demo\nend\n"])
+    redirect_stderr(devnull) do
+        @test captured_main(["rules", root])[2] == 2
+    end
+end
+
 @testset "corset: missing command or invalid option exits with 2" begin
     redirect_stderr(devnull) do
         @test captured_main(String[])[2] == 2
