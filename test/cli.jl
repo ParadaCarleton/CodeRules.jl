@@ -171,9 +171,11 @@ end
                 "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x)::T where {T} = convert(T, x)\nend\n",
             ],
         )
-        findings, _ = run_rules(load_config(unbraced), unbraced)
+        findings, _ = run_rules(load_config(unbraced), unbraced; fix = true)
         @test length(findings) == 2
         @test all(finding -> finding.rule == "where-return", findings)
+        @test occursin("(f(x::T)::T) where T = x", read(joinpath(unbraced, "src", "Demo.jl"), String))
+        @test occursin("g(x)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
     end
 
     @testset "module rules run on a loaded package" begin
