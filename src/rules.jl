@@ -386,7 +386,7 @@ function abstract_locals(
         [
             Site(method_key(item.method), string(item.method.file), slot_line(item, index))
                 for item in inferred
-                if startswith(string(item.method.file), repository.root)
+                if startswith(string(item.method.file), repository.root) && !isnothing(item.code.slottypes)
                 for (index, (name, type)) in enumerate(
                     zip(
                         item.code.slotnames,
@@ -1268,7 +1268,7 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
 end
 
 """One site per one-letter variable name in the Julia file `path`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
-function one_letter_sites(repository::Repository, path::AbstractString)::Vector{Site}
+function one_letter_sites(repository::Repository, path::AbstractString, located::AbstractVector{Located})::Vector{Site}
     return [
         Site(
             "$(basename(path)) $(item.enclosing)",
@@ -1277,10 +1277,13 @@ function one_letter_sites(repository::Repository, path::AbstractString)::Vector{
                 item.line :
                 definition_line(item.node, item.line),
         )
-            for item in located_source(path)
+            for item in located
             for _ in one_letter_names(item.node, repository.one_letter_exempt)
     ]
 end
+
+one_letter_sites(repository::Repository, path::AbstractString)::Vector{Site} =
+    one_letter_sites(repository, path, located_source(path))
 
 # One line of `fatou lint --output concise`: file, line, column, severity, rule and message.
 const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "

@@ -46,17 +46,17 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
 
     @testset "Project.toml preferences, overlaid by LocalPreferences.toml key by key" begin
         root = package_tree(
-            "name = \"Demo\"\n[preferences.Corset]\npedantic = true\nbaseline = \"base.toml\"\n[preferences.Corset.levels]\nfloat64 = \"deny\"\n",
+            "name = \"Demo\"\n[preferences.Corset]\npedantic = true\nbaseline = \"base.toml\"\n[preferences.Corset.levels]\nfloat64 = \"deny\"\nwhere-return = \"allow\"\n",
             [
                 "LocalPreferences.toml" =>
-                    "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n",
+                    "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n[Corset.levels]\nwhere-return = \"deny\"\n",
             ],
         )
         config = load_config(root)
         @test !config.pedantic
         @test config.baseline == "base.toml"
         @test config.skipped_directories == ("vendor",)
-        @test config.levels == Dict("float64" => :deny)
+        @test config.levels == Dict("float64" => :deny, "where-return" => :deny)
     end
 
     @testset "a typo fails loud" begin
@@ -157,6 +157,16 @@ end
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
+    @testset "where-return handles unbraced where T" begin
+        unbraced = package_tree(
+            "name = \"Demo\"\n",
+            ["src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\nend\n"],
+        )
+        findings, _ = run_rules(load_config(unbraced), unbraced)
+        @test !isempty(findings)
+        @test only(findings).rule == "where-return"
+    end
+
     @testset "module rules run on a loaded package" begin
         findings, skipped = run_rules(
             with_overrides(load_config(root), false, ["hidden-input" => :deny]),
@@ -205,6 +215,8 @@ end
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)
     @test occursin("float64", first(captured_main(["rules", root, "--pedantic"])))
     @test captured_main(["check", root, "--no-load", "--allow", "no-such-rule"])[2] == 2
+    @test captured_main(String[])[2] == 2
+    @test captured_main(["check", root, "--no-load", "--format", "invalid"])[2] == 2
     @test_throws ErrorException Corset.load_package(
         package_tree(
             "version = \"1\"\n",

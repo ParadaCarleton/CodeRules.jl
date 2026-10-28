@@ -156,11 +156,14 @@ function CheckOptions(arguments::AbstractDict)::CheckOptions
 end
 
 """The typed options of the command ArgParse parsed into `parsed`."""
-function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions}
-    if parsed["%COMMAND%"] == "rules"
+function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions, Nothing}
+    cmd = parsed["%COMMAND%"]
+    if cmd == "rules"
         return RulesOptions(parsed["rules"]["path"], parsed["rules"]["pedantic"])
+    elseif cmd == "check"
+        return CheckOptions(parsed["check"])
     end
-    return CheckOptions(parsed["check"])
+    return nothing
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
@@ -189,8 +192,10 @@ dependencies win. Where `execv` does not exist the command runs as a child and i
 """
 function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Cint
     ENV[INNER_VARIABLE] = "1"
+    corset_dir = pkgdir(@__MODULE__)
+    corset_load_path = isnothing(corset_dir) ? String[] : [corset_dir]
     ENV["JULIA_LOAD_PATH"] = join(
-        ["@", dirname(Base.active_project()), "@stdlib"],
+        ["@", corset_load_path..., "@v#.#", "@stdlib"],
         ifelse(Sys.iswindows(), ";", ":"),
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "using Corset; exit(Corset.main(ARGS))" -- $args`
@@ -316,13 +321,19 @@ finding fails the run, 2 on a usage or configuration error.
 """
 function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
     try
-        return run_options(command_options(parse_args(collect(String, args), argument_settings())), args, out, err)
+        options = command_options(parse_args(collect(String, args), argument_settings()))
+        if isnothing(options)
+            println(err, "corset: please specify a command (check or rules); run `corset --help` for usage")
+            return Cint(2)
+        end
+        return run_options(options, args, out, err)
     catch error_
         if broken_pipe(error_)
             return Cint(0)
         end
-        if error_ isa ErrorException
-            println(err, "corset: ", error_.msg)
+        if error_ isa Union{ErrorException, ArgParse.ArgParseError}
+            message = error_ isa ErrorException ? error_.msg : sprint(showerror, error_)
+            println(err, "corset: ", message)
             return Cint(2)
         end
         rethrow()
@@ -330,4 +341,4 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
 end
 
 """`run_command` on the process's standard streams, as they are when the command starts."""
-(@main)(args::AbstractVector{<:AbstractString})::Cint = run_command(args, stdout, stderr) # lint: hidden-input
+(@main)(args::AbstractVector{<:AbstractString} = ARGS)::Cint = run_command(args, stdout, stderr) # lint: hidden-input

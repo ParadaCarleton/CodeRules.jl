@@ -17,15 +17,15 @@ function allowances(repository::Repository, rule::AbstractString)::Dict{String, 
     return get(read_baseline(repository.baseline), rule, Dict{String, Union{Int, String}}())
 end
 
-"""The keys of `sites` that the baseline of `repository` does not allow for `rule`; with `update`, it is seeded and lowered as `offenders!` does."""
-function disallowed_keys(repository::Repository, rule::AbstractString, sites::AbstractVector{Site}, update::Bool)::Vector{String}
+"""The keys of `kept` sites that the baseline of `repository` does not allow for `rule`; with `update`, it is seeded and lowered as `offenders!` does."""
+function disallowed_keys(repository::Repository, rule::AbstractString, sites::AbstractVector{Site}, kept::AbstractVector{Site}, update::Bool)::Vector{String}
     if update
         if !isnothing(repository.baseline) && !isfile(repository.baseline)
+            mkpath(dirname(repository.baseline))
             touch(repository.baseline)
         end
         return offenders!(repository, rule, sites)
     end
-    kept, _ = unopted(sites, rule)
     return exceeding(allowances(repository, rule), tally(kept))
 end
 
@@ -41,10 +41,11 @@ function judge(
         update::Bool,
     )::Vector{Finding}
     name = rule_name(rule)
-    over = disallowed_keys(repository, name, sites, update)
+    kept, _ = unopted(sites, name)
+    over = disallowed_keys(repository, name, sites, kept, update)
     return [
         Finding(name, level, site)
-            for site in first(unopted(sites, name))
+            for site in kept
             if site.key in over
     ]
 end

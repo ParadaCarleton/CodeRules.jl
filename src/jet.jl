@@ -16,20 +16,23 @@ function loaded_jet()::Module
 end
 
 """The `Site` of JET report `report`: its innermost frame names the function and the line."""
-function jet_site(scope::String, report::Any)::Site
+function jet_site(scope::AbstractString, report::Any)::Site
+    if isempty(report.vst)
+        return Site("$scope: top_level $(nameof(typeof(report)))", "", 0)
+    end
     frame = last(report.vst)
-    method = frame.linfo.def
+    method = isdefined(frame, :linfo) && !isnothing(frame.linfo) ? frame.linfo.def : nothing
     name = method isa Method ? method.name : :top_level
     return Site("$scope: $name $(nameof(typeof(report)))", string(frame.file), frame.line)
 end
 
 """One site per report of JET analysis `result`."""
-jet_sites(scope::String, result::Any)::Vector{Site} = [jet_site(scope, report) for report in Base.invokelatest(loaded_jet().get_reports, result)]
+jet_sites(scope::AbstractString, result::Any)::Vector{Site} = [jet_site(scope, report) for report in Base.invokelatest(loaded_jet().get_reports, result)]
 
 """The code of `@call_sites` and `@opt_sites`: `sites` gains the sites of `report_macro` run on `arguments`."""
-function jet_assertion(report_macro::Symbol, scope::String, source::LineNumberNode, sites::Symbol, arguments::Tuple)::Expr
+function jet_assertion(report_macro::Symbol, scope::Any, source::LineNumberNode, sites::Any, arguments::Tuple)::Expr
     analysis = esc(Expr(:macrocall, GlobalRef(loaded_jet(), report_macro), source, arguments...))
-    return :(append!($(esc(sites)), jet_sites($scope, $analysis)))
+    return :(append!($(esc(sites)), jet_sites($(esc(scope)), $analysis)))
 end
 
 """`@call_sites scope sites target_modules = (…,) call(…)`: `JET.@report_call`'s reports appended to the vector `sites`."""

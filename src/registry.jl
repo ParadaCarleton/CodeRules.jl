@@ -137,7 +137,7 @@ missing_annotations(path, located)
 float64_sites(path)
 
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, path, located) ->
-one_letter_sites(context.repository, path)
+one_letter_sites(context.repository, path, located)
 
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, path, located) ->
 where_return_sites(path)

@@ -27,7 +27,12 @@ end
 function binds_an_argument(signature::SYNTAX.SyntaxNode)::Bool
     call, annotation = SYNTAX.children(signature)
     clause = SYNTAX.children(annotation)[2]
-    introduced = [first(identifier_names(variable)) for variable in SYNTAX.children(clause)]
+    children = SYNTAX.children(clause)
+    introduced = if isempty(children)
+        identifier_names(clause)
+    else
+        [first(names) for variable in children for names in (identifier_names(variable),) if !isempty(names)]
+    end
     return !isdisjoint(introduced, identifier_names(call))
 end
 
@@ -38,7 +43,10 @@ Push a `Site` for each short-form definition under `node` whose `where` binds th
 """
 function where_return_sites!(sites::AbstractVector{Site}, path::AbstractString, node::SYNTAX.SyntaxNode)::Nothing
     if is_where_return(node)
-        push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node))))
+        signature = first(SYNTAX.children(node))
+        if binds_an_argument(signature)
+            push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node))))
+        end
     end
     if !SYNTAX.is_leaf(node)
         for child in SYNTAX.children(node)
