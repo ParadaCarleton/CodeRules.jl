@@ -16,7 +16,7 @@ function loaded_jet(modules::AbstractDict{Base.PkgId, Module} = Base.loaded_modu
 end
 
 """The `Site` of JET report `report`: its innermost frame names the function and the line."""
-function jet_site(scope::String, report::Any)::Site
+function jet_site(scope::String, report::Any)::Site # lint: abstract-local  JET reports are duck-typed
     frame = last(report.vst)
     method = frame.linfo.def
     name = method isa Method ? method.name : :top_level

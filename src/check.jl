@@ -125,7 +125,7 @@ skipped because they read the loaded package `mod` and none was given. `fix` fir
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read.
 """
-function run_rules(
+function run_rules( # lint: abstract-local  loops over a tuple of different rule types
         config::Config,
         root::AbstractString;
         mod::Union{Module, Nothing} = nothing,
