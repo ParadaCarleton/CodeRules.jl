@@ -136,6 +136,9 @@ missing_annotations(path, located)
 @rule FileRule "float64" :pedantic "Float64 tokens and untyped float literals" (context, path, located) ->
 float64_sites(path)
 
+@rule FileRule "c-type" :pedantic "C-interop types (Cint, Cdouble, ...) outside a ccall" (context, path, located) ->
+c_type_sites(path)
+
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, path, located) ->
 one_letter_sites(context.repository, path)
 

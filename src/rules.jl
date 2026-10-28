@@ -1165,6 +1165,44 @@ function float64_sites(path::AbstractString)::Vector{Site}
     return sites
 end
 
+const CALL_KIND = SYNTAX.@K_str "call"
+# C-interop types: they mean something only at a C call, a `Ptr` boundary or a C-layout struct.
+const C_TYPE_NAMES = (
+    :Cchar, :Cuchar, :Cshort, :Cushort, :Cint, :Cuint, :Clong, :Culong, :Clonglong, :Culonglong,
+    :Cfloat, :Cdouble, :Csize_t, :Cssize_t, :Cptrdiff_t, :Cwchar_t, :Cstring, :Cwstring,
+)
+# Calls and macros whose body is C-facing, where C types belong.
+const C_BOUNDARY_NAMES = ("ccall", "cfunction", "@ccall", "@cfunction", "@ccallable")
+
+"""
+C-interop type names in syntax `node`, one site each at the name's own line, keyed by file, outside
+the body of `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` (also written `Base.ccall`).
+A field name (`Base.Cint`) and a quoted symbol are skipped.
+"""
+function c_type_sites(path::AbstractString, node::SYNTAX.SyntaxNode)::Vector{Site}
+    kind = SYNTAX.kind(node)
+    if SYNTAX.is_leaf(node)
+        if kind === IDENTIFIER_KIND && Symbol(SYNTAX.sourcetext(node)) in C_TYPE_NAMES
+            return [Site(basename(path), path, first(SYNTAX.source_location(node)))]
+        end
+        return Site[]
+    end
+    children = SYNTAX.children(node)
+    if kind === QUOTE_KIND
+        return Site[]
+    end
+    if kind in (CALL_KIND, MACROCALL_KIND) && last(split(SYNTAX.sourcetext(first(children)), '.')) in C_BOUNDARY_NAMES
+        return Site[]
+    end
+    if kind === FIELD_KIND
+        children = children[1:1]
+    end
+    return reduce(vcat, (c_type_sites(path, child) for child in children); init = Site[])
+end
+
+"""The C-type sites of the Julia file `path`, by `c_type_sites`."""
+c_type_sites(path::AbstractString)::Vector{Site} = c_type_sites(path, SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path))
+
 """Whether a parsed argument of a method signature has no `::` annotation (a bare name, alone or with a default or `...`)."""
 untyped_argument(argument::Symbol)::Bool = true
 function untyped_argument(argument::Expr)::Bool

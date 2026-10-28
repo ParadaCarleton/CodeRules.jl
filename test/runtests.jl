@@ -5,7 +5,7 @@ using JET: JET
 using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
-    boxed_closures, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
+    boxed_closures, c_type_sites, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
@@ -216,6 +216,10 @@ end
 
     @testset "float64: Float64 tokens and untyped float literals" begin
         @test site_lines(float64_sites(snippet_file("float64"))) == [1, 1]
+    end
+
+    @testset "c-type: C-interop types outside a ccall" begin
+        @test site_lines(c_type_sites(snippet_file("c-type"))) == [1, 1]
     end
 
     @testset "annotation: every argument and result annotated" begin

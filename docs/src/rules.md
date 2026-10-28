@@ -78,6 +78,7 @@ Each takes a file path and `located_source(file)`, the parsed file.
 | `concrete-return` | `concrete_returns(file, located, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
 | `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
+| `c-type` | `c_type_sites(file)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, file)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 
 ## Rules with fixers
