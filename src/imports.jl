@@ -59,23 +59,15 @@ struct ImportMove
     targets::Vector{String}
 end
 
-"""The names used by the interpolations (`\$name`, `\$(expression)`) in command text `text`."""
+"""The names used by the interpolations in command text `text`, found by Julia's own `Base.shell_parse` (none inside single quotes)."""
 function interpolated_names(text::AbstractString)::Vector{String}
-    names = String[]
-    position = findfirst('$', text)
-    while !isnothing(position)
-        escaped::Bool = position > firstindex(text) && text[prevind(text, position)] == '\\'
-        if escaped || position == lastindex(text)
-            position = findnext('$', text, nextind(text, position))
-            continue
-        end
-        parsed::Tuple{SYNTAX.SyntaxNode, Int} = SYNTAX.parseatom(SYNTAX.SyntaxNode, text, nextind(text, position))
-        atom, stop = parsed
-        append!(names, name_tokens(atom))
-        position = findnext('$', text, stop)
-    end
-    return names
+    return expression_names(first(Base.shell_parse(text)))
 end
+
+"""The names a parsed expression uses; a `QuoteNode` (a field name) uses none."""
+expression_names(name::Symbol)::Vector{String} = [String(name)]
+expression_names(expression::Expr)::Vector{String} = String[name for argument in expression.args for name in expression_names(argument)]
+expression_names(::Any)::Vector{String} = String[]
 
 """The names syntax `node` uses: identifiers, macros and string macros, without field names and import statements."""
 function name_tokens(node::SYNTAX.SyntaxNode)::Vector{String}
