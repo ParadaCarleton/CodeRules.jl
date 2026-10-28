@@ -3,9 +3,12 @@
 # itself with a Julia process running there (`execv`, so no launcher stays resident).
 
 # JSON loads on first use of `--format json`, so the other formats do not pay for it.
-using ArgParse: ArgParseSettings, add_arg_table!, parse_args
+using ArgParse: ArgParseSettings, ArgParseError, add_arg_table!, parse_args
 
 const INNER_VARIABLE = "CORSET_INNER"
+
+"""Rethrow an ArgParse error so `run_command` catches it and exits with 2."""
+rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err)
 
 """Add the argument or option `name` to `settings` with the ArgParse `options` (`help`, `action`, `default`, ...)."""
 option!(settings::ArgParseSettings, name::AbstractString; options...)::Nothing = (
@@ -20,6 +23,7 @@ function argument_settings()::ArgParseSettings
         description = "Code-quality rules for Julia packages.",
         add_version = true,
         version = string(pkgversion(@__MODULE__)),
+        exc_handler = rethrow_arg_error,
     )
     option!(settings, "check"; help = "run the rules over a project", action = :command)
     option!(
@@ -311,6 +315,9 @@ end
 """Whether `error_` is a write to a closed pipe (`corset rules | head`), which ends the run quietly."""
 broken_pipe(error_::Any)::Bool = error_ isa Base.IOError && error_.code == Base.UV_EPIPE
 
+error_message(error_::ErrorException)::String = error_.msg
+error_message(error_::ArgParseError)::String = error_.text
+
 """
     run_command(args, out, err)
 
@@ -324,8 +331,8 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
         if broken_pipe(error_)
             return 0
         end
-        if error_ isa ErrorException
-            println(err, "corset: ", error_.msg)
+        if error_ isa Union{ErrorException, ArgParseError}
+            println(err, "corset: ", error_message(error_))
             return 2
         end
         rethrow()
