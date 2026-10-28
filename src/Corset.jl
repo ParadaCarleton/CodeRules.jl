@@ -15,5 +15,10 @@ include("jet.jl")
 include("float64_scan.jl")
 include("imports.jl")
 include("where_return.jl")
+include("registry.jl")
+include("config.jl")
+include("check.jl")
+include("cli.jl")
+include("precompile.jl")
 
 end

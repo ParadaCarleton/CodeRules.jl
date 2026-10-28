@@ -1,6 +1,7 @@
 # Corset's own tests. Each rule reads deliberately bad code from `fixtures/`, kept out of `.jl`
 # files so a linter of this tree does not read it.
 using Test: @testset, @test, @test_logs, @test_throws
+using JET: JET
 using TOML: TOML
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
     boxed_closures, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
@@ -388,3 +389,5 @@ end
         @test !any(contains("passing"), [site.key for site in unmarked_effects(repository, inferred)])
     end
 end
+
+include("cli.jl")
