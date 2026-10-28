@@ -62,6 +62,15 @@ narrow(value::Float32)::Float32 = value * 2f0
 limit()::Float32 = Base.Inf32
 '''
 
+[c-type]
+source = '''
+exit_code(findings::AbstractVector)::Cint = Cint(length(findings))
+quoted()::Symbol = :Cint
+pid()::Int = Int(ccall(:getpid, Cint, ()))
+sized(count::Integer)::Int = Int(@ccall strlen("a"::Cstring)::Csize_t)
+via_base()::Int = Base.Cint(1)
+'''
+
 [annotation]
 source = '''
 untyped(value) = value
