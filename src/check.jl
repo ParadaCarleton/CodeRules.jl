@@ -10,11 +10,23 @@ struct Finding
 end
 
 """The allowances the baseline file of `repository` holds for `rule`: none when there is no file or no table."""
-function allowances(repository::Repository, rule::AbstractString)::Dict{String, Any}
+function allowances(repository::Repository, rule::AbstractString)::Dict{String, Union{Int, String}}
     if isnothing(repository.baseline) || !isfile(repository.baseline)
-        return Dict{String, Any}()
+        return Dict{String, Union{Int, String}}()
     end
-    return get(TOML.parsefile(repository.baseline), rule, Dict{String, Any}())
+    return get(read_baseline(repository.baseline), rule, Dict{String, Union{Int, String}}())
+end
+
+"""The keys of `sites` that the baseline of `repository` does not allow for `rule`; with `update`, it is seeded and lowered as `offenders!` does."""
+function disallowed_keys(repository::Repository, rule::AbstractString, sites::AbstractVector{Site}, update::Bool)::Vector{String}
+    if update
+        if !isnothing(repository.baseline) && !isfile(repository.baseline)
+            touch(repository.baseline)
+        end
+        return offenders!(repository, rule, sites)
+    end
+    kept, _ = unopted(sites, rule)
+    return exceeding(allowances(repository, rule), tally(kept))
 end
 
 """
@@ -29,16 +41,7 @@ function judge(
         update::Bool,
     )::Vector{Finding}
     name = rule_name(rule)
-    over = String[]
-    if update
-        if !isnothing(repository.baseline) && !isfile(repository.baseline)
-            touch(repository.baseline)
-        end
-        over = offenders!(repository, name, sites)
-    else
-        kept, _ = unopted(sites, name)
-        over = exceeding(allowances(repository, name), tally(kept))
-    end
+    over = disallowed_keys(repository, name, sites, update)
     return [
         Finding(name, level, site)
             for site in first(unopted(sites, name))

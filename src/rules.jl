@@ -12,14 +12,14 @@ is_definition(value::Any)::Bool = value isa Union{Type, Function, Module}
 Whether reading the global `binding` reads something besides an immutable constant:
 a non-constant binding, a mutable value (a `Ref`, `Dict`, cache, `Array`, `Atomic`),
 or a `ScopedValue`, whose value depends on the caller's scope rather than the
-arguments. Strings and symbols are immutable in use.
+arguments. Strings, symbols and regexes are immutable in use.
 """
 function is_hidden_input(binding::GlobalRef)::Bool
     if !isdefined(binding.mod, binding.name)
         return false
     end
     value = getfield(binding.mod, binding.name)
-    if is_definition(value) || value isa Union{AbstractString, Symbol}
+    if is_definition(value) || value isa Union{AbstractString, Symbol, Regex}
         return false
     end
     return !isconst(binding.mod, binding.name) ||
@@ -333,6 +333,8 @@ function abstract_local_type(inferred::Any)::Bool
         return length(members) > UNION_SPLIT_LIMIT || any(abstract_local_type, members)
     elseif type isa DataType && type.name === Base.unwrap_unionall(Type).name
         return false
+    elseif type isa DataType && type <: Tuple && length(type.parameters) == 1 && Base.isvarargtype(only(type.parameters))
+        return abstract_local_type(only(type.parameters).T)
     elseif !isconcretetype(type)
         return true
     elseif type <: AbstractArray
