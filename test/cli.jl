@@ -269,3 +269,10 @@ end
     @test !Corset.broken_pipe(Base.IOError("write", Base.UV_EIO))
     @test !Corset.broken_pipe(ErrorException("other"))
 end
+
+@testset "corset: missing command or invalid option exits with 2" begin
+    redirect_stderr(devnull) do
+        @test captured_main(String[])[2] == 2
+        @test captured_main(["check", "--format", "invalid"])[2] == 2
+    end
+end
