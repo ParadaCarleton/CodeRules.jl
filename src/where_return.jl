@@ -81,7 +81,7 @@ end
 function fix_where_returns(text::AbstractString)::String
     insertions = Pair{Int, String}[]
     where_return_insertions!(insertions, SYNTAX.parseall(SYNTAX.SyntaxNode, text))
-    bytes = codeunits(text)
+    bytes::Vector{UInt8} = Vector{UInt8}(codeunits(text))
     for (position, inserted) in sort(insertions; by = first, rev = true)
         bytes = vcat(bytes[1:(position - 1)], codeunits(inserted), bytes[position:end])
     end
