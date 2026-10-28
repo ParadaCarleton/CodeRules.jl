@@ -984,13 +984,17 @@ end
 const EXEMPT_RESULT_TYPES = (:Nothing, :Bool, :NamedTuple, :Tuple, :NTuple)
 
 """
+    names_concrete_type(annotation, scope, variables = ())
+
 Whether parsed type expression `annotation` names a concrete type of `scope` or of Base (`Float32`,
 `Vector{E}`, a package struct), alone or as a member of a `Union`. A result type must be
 generic (`typeof(x)`, a type variable, `AbstractVector{E}`), so a fixed concrete type is named here,
 except `Nothing`, `Bool`, tuples and `NamedTuple`s (`EXEMPT_RESULT_TYPES`) and enum types. A type variable,
-`typeof(x)` and an abstract type name none.
+`typeof(x)` and an abstract type name none. A package struct with a parameter that mentions one of the method's
+`where` `variables` (`Result{E}`, `Result{Vector{E}}`) is generic too: it has no abstract form to name instead.
+Base's own concrete types stay concrete with such a parameter, since `AbstractVector{E}` names `Vector{E}`'s.
 """
-function names_concrete_type(annotation::Symbol, scope::Module)::Bool
+function names_concrete_type(annotation::Symbol, scope::Module, ::Any = ())::Bool
     if annotation in EXEMPT_RESULT_TYPES
         return false
     end
@@ -1005,21 +1009,64 @@ function names_concrete_type(annotation::Symbol, scope::Module)::Bool
     end
     return false
 end
-function names_concrete_type(annotation::Expr, scope::Module)::Bool
+function names_concrete_type(annotation::Expr, scope::Module, variables::Any = ())::Bool
     if annotation.head !== :curly
         return false
     end
     if first(annotation.args) === :Union
         for member in annotation.args[2:end]
-            if names_concrete_type(member, scope)
+            if names_concrete_type(member, scope, variables)
                 return true
             end
         end
         return false
     end
-    return names_concrete_type(first(annotation.args), scope)
+    head = first(annotation.args)
+    if package_type(head, scope) &&mentions_variable(Expr(:tuple, annotation.args[2:end]...), variables)
+        return false
+    end
+    return names_concrete_type(head, scope, variables)
 end
-names_concrete_type(::Any, ::Module)::Bool = false
+names_concrete_type(::Any, ::Module, ::Any = ())::Bool = false
+
+"""Whether type name `head` resolves in `scope` to a type that neither Base nor Core defines."""
+function package_type(head::Symbol, scope::Module)::Bool
+    if !isdefined(scope, head)
+        return false
+    end
+    named = getglobal(scope, head)
+    return named isa Type && !(parentmodule(named) in (Base, Core))
+end
+package_type(::Any, ::Module)::Bool = false
+
+"""Whether parsed type expression `parameter` mentions one of the type variables `variables`, at any depth."""
+mentions_variable(parameter::Symbol, variables::Any)::Bool = parameter in variables
+function mentions_variable(parameter::Expr, variables::Any)::Bool
+    for argument in parameter.args
+        if mentions_variable(argument, variables)
+            return true
+        end
+    end
+    return false
+end
+mentions_variable(::Any, ::Any)::Bool = false
+
+"""The type variables parsed function definition `node` binds in its `where` clauses (`T` of `T <: Real` included)."""
+function where_variables(node::Expr)::Vector{Symbol}
+    variables = Symbol[]
+    signature = node.args[1]
+    while signature isa Expr && signature.head in (:where, :(::))
+        if signature.head === :where
+            append!(variables, bound_name.(signature.args[2:end]))
+        end
+        signature = signature.args[1]
+    end
+    return variables
+end
+
+"""The variable a `where` clause entry binds: `T`, `T <: Real` or `T >: Int`."""
+bound_name(entry::Symbol)::Symbol = entry
+bound_name(entry::Expr)::Symbol = bound_name(first(entry.args))
 
 """The type name at the head of parsed type expression `annotation` (`Foo` of `Foo{T}`), or `nothing`."""
 type_head(annotation::Symbol)::Symbol = annotation
@@ -1050,7 +1097,8 @@ const CONCRETE_RETURN_FIX =
 """
 Methods whose declared return type names a concrete type (`names_concrete_type`), one site per
 method at its signature, keyed by file and function name: a result type must be generic, annotated by
-what the arguments bind, not by a fixed type. A constructor returning its own struct (`constructs_own_type`) is exempt.
+what the arguments bind, not by a fixed type. A package struct parameterized by the method's `where` variables is
+generic. A constructor returning its own struct (`constructs_own_type`) is exempt.
 """
 function concrete_returns(
         path::AbstractString,
@@ -1067,7 +1115,7 @@ function concrete_returns(
             for item in located
             if !isnothing(signature_call(item.node)) &&
             length(item.node.args) >= 2 &&
-            names_concrete_type(return_annotation(item.node), scope) &&
+            names_concrete_type(return_annotation(item.node), scope, where_variables(item.node)) &&
             !constructs_own_type(item.node)
     ]
 end
