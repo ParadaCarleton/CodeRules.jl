@@ -46,10 +46,10 @@ fix!(::Rule, ::Context)::Nothing = nothing
 fixable(::Rule)::Bool = false
 
 # The parameters a rule's body names, by what the rule reads.
-const RULE_PARAMETERS = Dict{Symbol, Tuple{Vararg{Pair{Symbol, Any}}}}(
-    :ModuleRule => (Pair{Symbol, Any}(:context, :Context),),
-    :TreeRule => (Pair{Symbol, Any}(:context, :Context),),
-    :FileRule => (Pair{Symbol, Any}(:context, :Context), Pair{Symbol, Any}(:path, :String), Pair{Symbol, Any}(:located, :(Vector{Located}))),
+const RULE_PARAMETERS = (;
+    ModuleRule = (Pair{Symbol, Any}(:context, :Context),),
+    TreeRule = (Pair{Symbol, Any}(:context, :Context),),
+    FileRule = (Pair{Symbol, Any}(:context, :Context), Pair{Symbol, Any}(:path, :String), Pair{Symbol, Any}(:located, :(Vector{Located}))),
 )
 
 """

@@ -11,6 +11,7 @@ const STRING_TEXT_KIND = SYNTAX.@K_str "String"
 const MACRO_NAME_KIND = SYNTAX.@K_str "macro_name"
 const MODULE_KIND = SYNTAX.@K_str "module"
 const STRING_MACRO_NAME_KIND = SYNTAX.@K_str "StrMacroName"
+const COMMAND_TEXT_KIND = SYNTAX.@K_str "CmdString"
 # An import opts out on its own line or the line above; Fatou's own opt-out counts.
 const IMPORT_OPT_OUT = r"fatou-ignore\s+unused-import|lint:\s*misplaced-import"
 # A name the rule places: an identifier or macro. Operators (`import Base: +`) are used without a name token.
@@ -58,6 +59,23 @@ struct ImportMove
     targets::Vector{String}
 end
 
+"""The names used by the interpolations (`\$name`, `\$(expression)`) in command text `text`."""
+function interpolated_names(text::AbstractString)::Vector{String}
+    names = String[]
+    position = findfirst('$', text)
+    while !isnothing(position)
+        escaped = position > firstindex(text) && text[prevind(text, position)] == '\\'
+        if escaped || position == lastindex(text)
+            position = findnext('$', text, nextind(text, position))
+            continue
+        end
+        atom, stop = SYNTAX.parseatom(SYNTAX.SyntaxNode, text, nextind(text, position))
+        append!(names, name_tokens(atom))
+        position = findnext('$', text, stop)
+    end
+    return names
+end
+
 """The names syntax `node` uses: identifiers, macros and string macros, without field names and import statements."""
 function name_tokens(node::SYNTAX.SyntaxNode)::Vector{String}
     kind = SYNTAX.kind(node)
@@ -67,6 +85,8 @@ function name_tokens(node::SYNTAX.SyntaxNode)::Vector{String}
         return [String(SYNTAX.sourcetext(node))]
     elseif kind === STRING_MACRO_NAME_KIND
         return ["@" * SYNTAX.sourcetext(node) * "_str"]
+    elseif kind === COMMAND_TEXT_KIND
+        return interpolated_names(SYNTAX.sourcetext(node))
     elseif SYNTAX.is_leaf(node)
         return String[]
     elseif kind === MACRO_NAME_KIND

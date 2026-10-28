@@ -17,7 +17,10 @@ end
     root = mktempdir()
     mkpath(joinpath(root, "src"))
     write(joinpath(root, "Project.toml"), "name = \"WorkloadPackage\"\n")
-    write(joinpath(root, "src", "WorkloadPackage.jl"), "module WorkloadPackage\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nstruct Holder\n    held::Any\nend\nend\n")
+    write(
+        joinpath(root, "src", "WorkloadPackage.jl"),
+        "module WorkloadPackage\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nstruct Holder\n    held::Any\nend\nend\n",
+    )
     config = with_overrides(load_config(root), true, ["fatou" => :allow])
     findings, _ = run_rules(config, root; mod = WorkloadPackage)
     for format in ("human", "concise")

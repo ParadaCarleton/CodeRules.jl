@@ -114,8 +114,15 @@ remaining(entry::Integer, found::Integer)::Int = min(entry, found)
 exceeds(found::Integer, entry::AbstractString)::Bool = false
 exceeds(found::Integer, entry::Integer)::Bool = found > entry
 
+"""A baseline file: per rule, the allowance (a count or a note) of each offender."""
+const Baseline = Dict{String, Dict{String, Union{Int, String}}}
+
+"""The baseline in the TOML file at `path`."""
+read_baseline(path::AbstractString)::Baseline =
+    Baseline(rule => Dict{String, Union{Int, String}}(entries) for (rule, entries) in TOML.parsefile(path))
+
 """Write `baseline` to the file at `path` in one rename, so a reader never sees half a file."""
-function write_baseline!(baseline::AbstractDict, path::AbstractString)::String
+function write_baseline!(baseline::Baseline, path::AbstractString)::String
     buffer = IOBuffer()
     TOML.print(buffer, baseline; sorted = true)
     staged = "$path.$(getpid())"
@@ -192,9 +199,9 @@ function offenders!(
     # ponytail: testsets on separate processes may rewrite at once; the rename is atomic, so
     # one lowering can be lost (the baseline stays higher, never wrong) and the next run redoes it.
     path = realpath(baseline_file)
-    baseline = TOML.parsefile(path)
+    baseline = read_baseline(path)
     if !haskey(baseline, rule)
-        baseline[rule] = measured
+        baseline[rule] = Dict{String, Union{Int, String}}(measured)
         write_baseline!(baseline, path)
         @warn "$rule: no table in $path; seeded with today's $(sum(values(measured); init = 0)) site(s)"
         return String[]

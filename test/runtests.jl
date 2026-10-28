@@ -3,6 +3,7 @@
 using Test: @testset, @test, @test_logs, @test_throws
 using JET: JET
 using TOML: TOML
+using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
     boxed_closures, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
@@ -260,6 +261,22 @@ end
             place_imports!(Repository(kept_tree), (".",))
             @test read(joinpath(kept_tree, "kept.jl"), String) == snippets["kept"]
         end
+    end
+
+    @testset "misplaced-import: a name used only in a command interpolation counts as used" begin
+        tree = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nusing B: b\nusing C: c\nf() = `echo \$(a.x()) \$b \\\$c \$`\n"])
+        @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["cmd.jl c"]
+    end
+
+    @testset "hidden-input: a regex constant is not state; a global stream is" begin
+        @test !Corset.is_hidden_input(GlobalRef(Corset, :OPT_OUT))
+        @test Corset.is_hidden_input(GlobalRef(Base, :stdout))
+    end
+
+    @testset "abstract-local: a homogeneous variadic tuple is concrete in use, a bare Tuple is not" begin
+        @test !Corset.abstract_local_type(Tuple{Vararg{String}})
+        @test Corset.abstract_local_type(Tuple)
+        @test Corset.abstract_local_type(Tuple{Vararg{Real}})
     end
 end
 
