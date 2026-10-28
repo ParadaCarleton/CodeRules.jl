@@ -31,9 +31,17 @@ const LEVELS = (:allow, :warn, :deny)
     levels::Union{Nothing, Dict{String, String}} = nothing
 end
 
-"""`over`'s keys where it sets them, else `under`'s."""
-overlay(under::Preferences, over::Preferences)::Preferences =
-    Preferences((something(getfield(over, name), getfield(under, name), Some(nothing)) for name in fieldnames(Preferences))...)
+"""Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
+merged(under::Dict, over::Dict)::Dict = merge(under, over)
+merged(under::Any, over::Any)::Any = something(over, under, Some(nothing))
+
+"""`over`'s keys where it sets them, else `under`'s; nested dictionaries are merged."""
+overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
+    (
+        merged(getfield(under, name), getfield(over, name))
+            for name in fieldnames(Preferences)
+    )...
+)
 
 """The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""
 function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences # lint: abstract-local  TOML tables are Dict{String, Any}
@@ -66,13 +74,20 @@ function load_config(root::AbstractString)::Config
         read_preferences(joinpath(root, "Project.toml"), ("preferences", "Corset")),
         read_preferences(joinpath(root, "LocalPreferences.toml"), ("Corset",)),
     )
-    levels = Dict{String, Symbol}(rule => Symbol(level) for (rule, level) in something(prefs.levels, Dict{String, String}()))
+    levels = Dict{String, Symbol}(
+        rule => Symbol(level)
+            for (rule, level) in something(prefs.levels, Dict{String, String}())
+    )
     for (rule, level) in levels
         if rule ∉ rule_name.(RULES)
-            error("[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))")
+            error(
+                "[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))",
+            )
         end
         if level ∉ LEVELS
-            error("[preferences.Corset.levels] sets $rule to $(repr(string(level))); a level is one of $(join(LEVELS, ", "))")
+            error(
+                "[preferences.Corset.levels] sets $rule to $(repr(string(level))); a level is one of $(join(LEVELS, ", "))",
+            )
         end
     end
     return Config(
@@ -91,7 +106,12 @@ function repository(config::Config, root::AbstractString)::Repository
     if !isnothing(config.baseline)
         baseline = abspath(root, config.baseline)
     end
-    return Repository(root; baseline, one_letter_exempt = config.one_letter_exempt, skipped_directories = config.skipped_directories)
+    return Repository(
+        root;
+        baseline,
+        one_letter_exempt = config.one_letter_exempt,
+        skipped_directories = config.skipped_directories,
+    )
 end
 
 """The level `config` gives `rule`: its own setting, else `:warn` for the default group and for the pedantic group when on."""
