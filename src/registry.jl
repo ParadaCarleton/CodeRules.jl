@@ -60,16 +60,16 @@ parameters of its kind bound as written: `context` for the first two, `context`,
 a `FileRule`. The type is the rule name in CamelCase with `Rule` appended.
 """
 macro rule(kind, name, group, summary, definition)
-    parameters = Any[definition.args[1]]
+    parameters::Vector{Union{Symbol, Expr}} = [definition.args[1]]
     if definition.args[1] isa Expr
         parameters = definition.args[1].args
     end
-    expected = collect(first.(RULE_PARAMETERS[kind]))
+    expected::Vector{Symbol} = collect(first.(RULE_PARAMETERS[kind]))
     if parameters != expected
         error("a $kind takes the parameters $(Tuple(expected)), not $(Tuple(parameters))")
     end
     type = Symbol(join(titlecase.(split(name, '-'))), "Rule")
-    arguments = [:($parameter::$annotation) for (parameter, annotation) in RULE_PARAMETERS[kind]]
+    arguments::Vector{Expr} = [:($parameter::$annotation) for (parameter, annotation) in RULE_PARAMETERS[kind]]
     return esc(
         quote
             struct $type <: $kind end
