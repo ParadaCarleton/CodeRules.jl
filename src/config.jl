@@ -48,8 +48,8 @@ end
 overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
     (
         name === :levels ? overlay_levels(under.levels, over.levels) :
-        something(getfield(over, name), getfield(under, name), Some(nothing))
-        for name in fieldnames(Preferences)
+            something(getfield(over, name), getfield(under, name), Some(nothing))
+            for name in fieldnames(Preferences)
     )...,
 )
 
