@@ -1,0 +1,21 @@
+using Test: @test
+
+function uses_macro(argument::Any)::Any
+    @test argument > 0
+    return argument
+end
+
+function nested(count::Integer)::Integer
+    outer = () -> (inner = () -> count; inner())
+    return outer()
+end
+
+function recursive(count::Integer)::Integer
+    again = step -> step == 0 ? 0 : again(step - 1)
+    return again(count)
+end
+
+function twice(count::Integer)::Integer
+    reader = () -> count
+    return reader() + reader()
+end

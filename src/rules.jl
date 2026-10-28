@@ -99,17 +99,11 @@ function defined_methods(mod::Module)::Vector{Method}
 end
 
 """The name of the type whose instances `method` is called on (its function's type), or `nothing`."""
-function callee_name(method::Method)::Union{Core.TypeName, Nothing}
-    callee = Base.unwrap_unionall(method.sig).parameters[1]
-    if callee isa TypeVar
-        callee = callee.ub
-    end
-    callee = Base.unwrap_unionall(callee)
-    if callee isa DataType
-        return callee.name
-    end
-    return nothing
-end
+callee_name(method::Method)::Union{Core.TypeName, Nothing} = callee_name(Base.unwrap_unionall(method.sig).parameters[1])
+callee_name(callee::TypeVar)::Union{Core.TypeName, Nothing} = callee_name(callee.ub)
+callee_name(callee::UnionAll)::Union{Core.TypeName, Nothing} = callee_name(Base.unwrap_unionall(callee))
+callee_name(callee::DataType)::Core.TypeName = callee.name
+callee_name(::Any)::Nothing = nothing
 
 """The closure types of `mod` that lowered statements `code` name, by type name."""
 named_closures(code::Core.CodeInfo, mod::Module)::Vector{Core.TypeName} = Core.TypeName[
@@ -156,33 +150,35 @@ trees) is a leftover type that no current code reaches, and is not the source's.
 """
 function live_closures(mod::Module, methods::AbstractVector{Method})::Set{Core.TypeName}
     closure_names = closure_type_names(mod)
-    closure_methods = Dict{Core.TypeName, Vector{Method}}()
-    # A worklist of reached names: its length is the number of reachable closures, unknown up front.
-    pending = Core.TypeName[]
+    created = Dict{Core.TypeName, Set{Core.TypeName}}()
+    roots = Set{Core.TypeName}()
     for method in methods
         name = callee_name(method)
-        code = lowered(method)
         if name in closure_names
-            push!(get!(closure_methods, name, Method[]), method)
-        elseif code isa Core.CodeInfo
-            append!(pending, named_closures(code, mod))
+            created[name] = union(get(created, name, Set{Core.TypeName}()), created_closures(method, mod))
+        else
+            roots = union(roots, created_closures(method, mod))
         end
     end
-    live = Set{Core.TypeName}()
-    while !isempty(pending)
-        name = pop!(pending)
-        if name in live
-            continue
-        end
-        push!(live, name)
-        for method in get(closure_methods, name, Method[])
-            code = lowered(method)
-            if code isa Core.CodeInfo
-                append!(pending, named_closures(code, mod))
-            end
-        end
+    return fixed_reach(roots, created)
+end
+
+"""Closure types (by name) that the lowered code of `method` creates."""
+function created_closures(method::Method, mod::Module)::Vector{Core.TypeName}
+    code = lowered(method)
+    if code isa Core.CodeInfo
+        return named_closures(code, mod)
     end
-    return live
+    return Core.TypeName[]
+end
+
+"""`live` closed under `created`: every closure a member's own code creates, repeated until none is new."""
+function fixed_reach(live::Set{T}, created::AbstractDict{T, Set{T}})::Set{T} where {T}
+    grown = union(live, (get(created, name, Set{T}()) for name in live)...)
+    if grown == live
+        return live
+    end
+    return fixed_reach(grown, created)
 end
 
 """
@@ -217,12 +213,8 @@ The line of `method`'s source that lowered statement `index` of `code` comes fro
 method itself for a statement from another file (a macro's).
 """
 function statement_line(code::Core.CodeInfo, method::Method, index::Integer)::Int
-    for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index)
-        if node.file === method.file
-            return node.line
-        end
-    end
-    return method.line
+    own_lines = [node.line for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index) if node.file === method.file]
+    return get(own_lines, 1, method.line)
 end
 
 """
@@ -482,13 +474,9 @@ nested closures to the first namer that is not itself a closure.
 """
 function closure_definer(name::Core.TypeName, namers::AbstractDict{Core.TypeName, Method})::Method
     definer = namers[name]
-    # Each pass moves out one closure, so no chain of namers is longer than the closures named.
-    for _ in 1:length(namers)
-        outer = callee_name(definer)
-        if !haskey(namers, outer)
-            return definer
-        end
-        definer = namers[outer]
+    outer = callee_name(definer)
+    if haskey(namers, outer)
+        return closure_definer(outer, namers)
     end
     return definer
 end

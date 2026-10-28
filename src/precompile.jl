@@ -1,5 +1,7 @@
 # Compiles the `check` path while Corset precompiles, so a run of `corset` reuses the cached code
 # and spends its time and memory on the project, not on the compiler.
+# COV_EXCL_START
+# The workload runs while the package precompiles, outside any test.
 
 # fatou-ignore unused-import: the macro expansion names the module
 using PrecompileTools: PrecompileTools, @compile_workload
@@ -35,3 +37,4 @@ end
         end
     end
 end
+# COV_EXCL_STOP

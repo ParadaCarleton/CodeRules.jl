@@ -39,8 +39,8 @@ The `Site`s `rule` finds: in the whole `context` for a `ModuleRule` or `TreeRule
 """
 function check end
 
-"""Rewrite the source files so `rule` finds nothing, returning the sites it fixed; `nothing` for a rule with no fixer."""
-fix!(::Rule, ::Context)::Nothing = nothing
+"""Rewrite the source files so `rule` finds nothing. Only a `fixable` rule has a method."""
+function fix! end
 
 """Whether `rule` has a `fix!`."""
 fixable(::Rule)::Bool = false
