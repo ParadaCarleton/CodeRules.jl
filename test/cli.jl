@@ -46,17 +46,17 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
 
     @testset "Project.toml preferences, overlaid by LocalPreferences.toml key by key" begin
         root = package_tree(
-            "name = \"Demo\"\n[preferences.Corset]\npedantic = true\nbaseline = \"base.toml\"\n[preferences.Corset.levels]\nfloat64 = \"deny\"\n",
+            "name = \"Demo\"\n[preferences.Corset]\npedantic = true\nbaseline = \"base.toml\"\n[preferences.Corset.levels]\nfloat64 = \"deny\"\nwhere-return = \"allow\"\n",
             [
                 "LocalPreferences.toml" =>
-                    "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n",
+                    "[Corset]\npedantic = false\nskipped_directories = [\"vendor\"]\n[Corset.levels]\nwhere-return = \"deny\"\n",
             ],
         )
         config = load_config(root)
         @test !config.pedantic
         @test config.baseline == "base.toml"
         @test config.skipped_directories == ("vendor",)
-        @test config.levels == Dict("float64" => :deny)
+        @test config.levels == Dict("float64" => :deny, "where-return" => :deny)
     end
 
     @testset "a typo fails loud" begin

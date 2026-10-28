@@ -31,9 +31,27 @@ const LEVELS = (:allow, :warn, :deny)
     levels::Union{Nothing, Dict{String, String}} = nothing
 end
 
-"""`over`'s keys where it sets them, else `under`'s."""
-overlay(under::Preferences, over::Preferences)::Preferences =
-    Preferences((something(getfield(over, name), getfield(under, name), Some(nothing)) for name in fieldnames(Preferences))...)
+"""Merge two level preference tables, with `over` overriding matching rules in `under`."""
+function overlay_levels(
+        under::Union{Nothing, Dict{String, String}},
+        over::Union{Nothing, Dict{String, String}},
+    )::Union{Nothing, Dict{String, String}}
+    if isnothing(under)
+        return over
+    elseif isnothing(over)
+        return under
+    end
+    return merge(under, over)
+end
+
+"""`over`'s keys where it sets them, else `under`'s; nested `levels` dictionaries are merged."""
+overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
+    (
+        name === :levels ? overlay_levels(under.levels, over.levels) :
+        something(getfield(over, name), getfield(under, name), Some(nothing))
+        for name in fieldnames(Preferences)
+    )...,
+)
 
 """The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""
 function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences
