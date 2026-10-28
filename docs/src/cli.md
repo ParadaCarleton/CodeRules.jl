@@ -6,7 +6,7 @@ optionally fixes or previews automated code rewrites.
 
 ## Installation
 
-Install `corset` using Julia's declarative application manager (Julia 1.12+):
+Install `corset` using Julia's declarative application manager (Julia 1.13):
 
 ```julia
 pkg> app add Corset
