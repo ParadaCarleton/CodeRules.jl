@@ -239,6 +239,8 @@ end
             @test isempty(fatou_sites(Repository(tree), (".",)))
             fake_fatou(bin, "source.jl: parse error\\n")
             @test_throws ErrorException fatou_sites(Repository(tree), (".",))
+            ENV["PATH"] = string(mktempdir())
+            @test_throws ErrorException fatou_sites(Repository(tree), (".",))
         finally
             ENV["PATH"] = path
         end
@@ -283,6 +285,8 @@ end
 @testset "short-form `where` binds the method, not the return annotation" begin
     @test fix_where_returns("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
         "(f(x::V{E})::Vector{E}) where {E<:Real} = x\n"
+    @test fix_where_returns("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
+        "(f(x::V{E}, 1)::Vector{E}) where {E} = x\n"
     @testset "no argument uses the variable, so the annotation may be deliberate" begin
         kept = "g()::Vector{T} where {T} = T[]\n"
         @test fix_where_returns(kept) == kept
@@ -373,6 +377,145 @@ end
         ]
     )
     @test result["child.jl"] == "using A: a\n@testset \"x\" begin\n    @test f(a(2))\nend\n"
+end
+
+@testset "import placement reads every include form and import shape" begin
+    @testset "a moved import joins the imports the target file already has, at their indent" begin
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "using C: c\ng() = a + c\n"])
+        @test result["child.jl"] == "using C: c\nusing A: a\ng() = a + c\n"
+        result = placed(["main.jl" => "module M\n    using A: a\n    include(\"child.jl\")\nend\n", "child.jl" => "    using C: c\n    g() = a + c\n"])
+        @test result["child.jl"] == "    using C: c\n    using A: a\n    g() = a + c\n"
+    end
+    @testset "an import has nowhere to go in a module without imports" begin
+        @test_throws ErrorException placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "module Inner\ng() = a\nend\n"])
+    end
+    @testset "an unused import sharing its line with code is cut out of the line" begin
+        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; ; f() = 1; end\n"
+    end
+    @testset "aliases, macros and string macros are names" begin
+        @test placed(["main.jl" => "using A: a as b, @m\nf() = b\ng() = raw\"x\"\n"])["main.jl"] == "using A: a as b\nf() = b\ng() = raw\"x\"\n"
+    end
+    @testset "include paths: joinpath with @__DIR__ is followed, anything else blocks the move" begin
+        files = ["main.jl" => "using A: a\ninclude(joinpath(@__DIR__, \"child.jl\"))\n", "child.jl" => "g() = a\n"]
+        @test placed(files)["child.jl"] == "using A: a\ng() = a\n"
+        for blocked in ("include(\"gone.jl\")", "include(name)", "include(string(\"child.jl\"))", "include(\"child.jl\", 1)")
+            kept = "using A: a\n$blocked\n"
+            @test placed(["main.jl" => kept, "child.jl" => "g() = a\n"])["main.jl"] == kept
+        end
+        cyclic = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "include(\"child.jl\")\ng() = a\n"])
+        @test cyclic["main.jl"] == "include(\"child.jl\")\n"
+    end
+end
+
+module Shapes
+    struct Callable end
+    struct Left end
+    struct Right end
+    struct Control
+        step_size::Int
+        step_count::Int
+        step_limit::Int
+    end
+    (callable::Callable)(argument::Any) = argument
+end
+
+@testset "rule helpers read every shape of input" begin
+    @testset "a callee is the type its method is called on, through a type variable bound" begin
+        @test Corset.callee_name(only(methods(Shapes.Callable()))) === Shapes.Callable.name
+        @test Corset.callee_name(TypeVar(:T, Shapes.Callable)) === Shapes.Callable.name
+        @test Corset.callee_name(Vector) === Vector.body.name
+        @test isnothing(Corset.callee_name(Union{Shapes.Left, Shapes.Right}))
+    end
+    @testset "a missing binding hides no input" begin
+        @test !Corset.is_hidden_input(GlobalRef(Main, :no_such_binding_anywhere))
+    end
+    @testset "abstract local types: unions, containers, tuples and Type" begin
+        concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})
+        @test !any(Corset.abstract_local_type, concrete)
+        @test Corset.abstract_local_type(Union{Int, Float64, String, Char, Symbol})
+        for element in (Any, Number)
+            @test Corset.abstract_local_type(element)
+            @test Corset.abstract_local_type(Union{Int, element})
+            @test Corset.abstract_local_type(Vector{element})
+            @test Corset.abstract_local_type(Dict{String, element})
+            @test Corset.abstract_local_type(Tuple{Int, element})
+            @test Corset.abstract_local_type(Tuple{Vararg{element}})
+            @test Corset.holds_abstract(Tuple{element})
+        end
+    end
+    @testset "declared field types: abstract at any depth" begin
+        @test Corset.holds_abstract(Vector{Vector})
+        @test !Corset.holds_abstract(Vector{Int})
+    end
+    @testset "a word shared by most fields is the prefix the type should say once" begin
+        @test Corset.repeated_prefix(Shapes.Control) == "step"
+    end
+    @testset "nodes of another kind are no range guard and call no exp" begin
+        @test !Corset.is_range_guard(:name)
+        @test !Corset.calls_exp(:name)
+    end
+    @testset "a definition without a body marker starts at the line it was found" begin
+        @test Corset.definition_line(Expr(:call, :f), 7) == 7
+    end
+    @testset "a testset names the code inside it" begin
+        @test Corset.testset_name(Meta.parse("@testset \"a b\" begin end")) === Symbol("a b")
+        @test isnothing(Corset.testset_name(Meta.parse("@testset begin end")))
+        path = tempname() * ".jl"
+        write(path, "@testset \"inside\" begin\n    f(a) = 1\nend\n")
+        @test any(item.enclosing === :inside for item in located_source(path))
+    end
+    @testset "concrete containers: bare, in a Union, and not a type at all" begin
+        @test Corset.is_concrete_container(Meta.parse("Union{Vector, Nothing}"))
+        @test !Corset.is_concrete_container(Meta.parse("a.b"))
+        @test !Corset.is_concrete_container(1)
+    end
+    @testset "annotated arguments: keyword, keyword-section and splat forms" begin
+        @test Corset.annotated_arguments(Expr(:kw, :(x::Int), 1)) == [(:x, :Int)]
+        @test Corset.annotated_arguments(Expr(:parameters, :(k::Int))) == [(:k, :Int)]
+        @test Corset.annotated_arguments(Expr(:parameters, Expr(:kw, :(k::Int), 1))) == [(:k, :Int)]
+        @test Corset.annotated_arguments(Expr(:..., :(rest::Int))) == [(:rest, :Int)]
+        @test isempty(Corset.annotated_arguments(Expr(:parameters, :plain)))
+    end
+    @testset "result types: unknown names, literals and non-types are no package struct" begin
+        @test !Corset.package_type(:NoSuchTypeAnywhere, Main)
+        @test !Corset.package_type(1, Main)
+        @test !Corset.mentions_variable(1, (:E,))
+        @test isnothing(Corset.type_head(Meta.parse("a.b")))
+        @test isnothing(Corset.type_head(1))
+        @test !Corset.constructs_own_type(:(x = 1))
+    end
+    @testset "untyped arguments: defaults and literals" begin
+        @test Corset.untyped_argument(Expr(:kw, :x, 1))
+        @test !Corset.untyped_argument(1)
+    end
+    @testset "bound names: defaults, tuples and field targets" begin
+        @test Corset.bound_names(Expr(:kw, :x, 1)) == [:x]
+        @test Corset.bound_names(Expr(:tuple, :a, :b)) == [:a, :b]
+        @test isempty(Corset.bound_names(Meta.parse("a.b")))
+        @test Corset.one_letter_names(Meta.parse("try\n1\ncatch e\n2\nend"), ()) == [:e]
+    end
+end
+
+@testset "closure reflection follows nested closures and macro-made code" begin
+    closure_chain = Module(:ClosureChain)
+    Base.include(closure_chain, joinpath(FIXTURES, "closure_module.txt"))
+    defined = Corset.defined_methods(closure_chain)
+    namers = Corset.closure_namers(closure_chain, defined)
+    @testset "a nested closure is defined by the function that holds the outermost one" begin
+        @test Set(Corset.closure_definer(name, namers).name for name in keys(namers)) == Set([:nested, :recursive, :twice])
+        @test length(Corset.live_closures(closure_chain, defined)) == length(namers)
+    end
+    @testset "code from a macro sits at the method's line, and a bare argument slot too" begin
+        method = only(methods(closure_chain.uses_macro))
+        code = Corset.lowered(method)
+        @test any(index -> Corset.statement_line(code, method, index) == method.line, eachindex(code.code))
+        @test Corset.slot_line(Corset.Inferred(method, code, Any), 2) == method.line
+    end
+    @testset "a builtin has no lowered code and returns no argument's call" begin
+        @test isnothing(Corset.lowered(first(methods(Core.tuple))))
+        @test isempty(Corset.created_closures(first(methods(Core.tuple)), Corset))
+        @test !Corset.returns_argument_call(first(methods(Core.tuple)))
+    end
 end
 
 module Probe

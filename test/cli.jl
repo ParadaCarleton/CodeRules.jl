@@ -21,8 +21,8 @@ function package_tree(project::AbstractString, files::AbstractVector{<:Pair})::S
 end
 
 """The standard output and the exit code of `main(args)`."""
-function captured_main(args::AbstractVector{String})::Tuple{String, Cint}
-    code = Ref(Cint(0))
+function captured_main(args::AbstractVector{String})::Tuple{String, Int}
+    code = Ref(0)
     output = mktemp() do path, io
         redirect_stdout(io) do
             code[] = Corset.main(args)
@@ -153,7 +153,7 @@ end
             "name = \"Demo\"\n",
             ["src/Demo.jl" => "module Demo\ng(x) = x\nend\n"],
         )
-        @test captured_main(["check", clean, "--diff"]) == ("", Cint(0))
+        @test captured_main(["check", clean, "--diff"]) == ("", 0)
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
@@ -225,6 +225,43 @@ end
     process = run(pipeline(ignorestatus(command); stdout = joinpath(project, "out.txt")))
     @test process.exitcode == 1
     @test occursin("hidden-input] COUNTER", read(joinpath(project, "out.txt"), String))
+end
+
+@testset "corset: every pedantic rule reports on a source that breaks it" begin
+    root = mktempdir()
+    fixture = load_fixture(joinpath(root, "src"))
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "annotation", "one-letter")), "\n")
+    write(joinpath(root, "src", "smells.jl"), smells)
+    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
+    config = with_overrides(load_config(root), true, Pair{String, Symbol}[])
+    bin = fake_fatou(mktempdir(), "src/smells.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
+    path = ENV["PATH"]
+    ENV["PATH"] = "$bin:$path"
+    try
+        findings, skipped = run_rules(config, root; mod = fixture)
+        @test isempty(skipped)
+        pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]
+        @test setdiff(pedantic, Set(finding.rule for finding in findings)) == String[]
+    finally
+        ENV["PATH"] = path
+    end
+end
+
+@testset "corset: JET sites need the caller's JET" begin
+    @test_throws ErrorException Corset.loaded_jet(Dict{Base.PkgId, Module}())
+    @test Corset.loaded_jet() isa Module
+end
+
+"""An output stream whose every write throws `failure`."""
+struct FailingStream{E <: Exception} <: IO
+    failure::E
+end
+Base.write(stream::FailingStream, ::String)::Nothing = throw(stream.failure)
+
+@testset "corset: a write failure ends the run" begin
+    root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
+    @test Corset.run_command(["rules", root], FailingStream(Base.IOError("write", Base.UV_EPIPE)), devnull) == 0
+    @test_throws DomainError Corset.run_command(["rules", root], FailingStream(DomainError(1)), devnull)
 end
 
 @testset "corset: a closed output pipe ends the run quietly" begin

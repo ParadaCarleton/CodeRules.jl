@@ -187,7 +187,9 @@ Replace this process with a Julia process whose active project is `root`, runnin
 Corset's own environment stays on the load path after the project's, so the project's versions of shared
 dependencies win. Where `execv` does not exist the command runs as a child and its exit code is returned.
 """
-function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Cint
+function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE
+    # COV_EXCL_START
+    # execv replaces the process before it can write its coverage
     ENV[INNER_VARIABLE] = "1"
     ENV["JULIA_LOAD_PATH"] = join(
         ["@", dirname(Base.active_project()), "@stdlib"],
@@ -195,7 +197,7 @@ function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString}):
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "using Corset; exit(Corset.main(ARGS))" -- $args`
     if Sys.iswindows()
-        return Cint(run(ignorestatus(command)).exitcode)
+        return run(ignorestatus(command)).exitcode
     end
     strings = collect(command.exec)
     GC.@preserve strings begin
@@ -203,6 +205,7 @@ function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString}):
         ccall(:execv, Cint, (Cstring, Ptr{Ptr{UInt8}}), strings[1], argv)
     end
     error("execv failed: $(Libc.strerror(Libc.errno()))")
+    # COV_EXCL_STOP
 end
 
 """The path of `site` relative to `root`; empty for a site with no file."""
@@ -252,8 +255,8 @@ function print_findings(
 end
 
 """The exit code for `findings`: 1 for any deny-level finding, or any finding when `deny_warnings`; else 0."""
-function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Cint
-    return Cint(any(finding -> finding.level === :deny || deny_warnings, findings))
+function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Int
+    return Int(any(finding -> finding.level === :deny || deny_warnings, findings))
 end
 
 """The `corset rules` line for `rule`: its name, group, the level `config` gives it, and its summary."""
@@ -266,17 +269,17 @@ function print_rules(io::IO, config::Config)::Nothing
 end
 
 """`corset check --diff`: print the changes `--fix` would make to `io`; the exit code is 1 when there are any."""
-function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)::Cint
+function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)::Int # COV_EXCL_LINE
     if fix
         error("--diff writes nothing and --fix writes the changes; pass one")
     end
     changes = fix_diff(config, root)
     print(io, changes)
-    return Cint(!isempty(changes))
+    return Int(!isempty(changes))
 end
 
 """Run `corset check` with `options` (from the command line `args`); returns the exit code."""
-function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
+function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     root = project_root(options.path)
     config = with_overrides(load_config(root), options.pedantic, options.overrides)
     if options.diff
@@ -284,7 +287,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     end
     loads = reads_package(config) && !options.no_load
     if loads && !haskey(ENV, INNER_VARIABLE)
-        return relaunch(root, args)
+        return relaunch(root, args) # COV_EXCL_LINE
     end
     mod = nothing
     if loads
@@ -299,10 +302,10 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
 end
 
 """Run `corset rules`: print the rules and their levels to `out`."""
-function run_options(options::RulesOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
+function run_options(options::RulesOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     config = with_overrides(load_config(project_root(options.path)), options.pedantic, Pair{String, Symbol}[])
     print_rules(out, config)
-    return Cint(0)
+    return 0
 end
 
 """Whether `error_` is a write to a closed pipe (`corset rules | head`), which ends the run quietly."""
@@ -314,20 +317,20 @@ broken_pipe(error_::Any)::Bool = error_ isa Base.IOError && error_.code == Base.
 The `corset` command on the streams `out` and `err`. Returns the exit code: 0 when clean, 1 when a
 finding fails the run, 2 on a usage or configuration error.
 """
-function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Cint
+function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     try
         return run_options(command_options(parse_args(collect(String, args), argument_settings())), args, out, err)
     catch error_
         if broken_pipe(error_)
-            return Cint(0)
+            return 0
         end
         if error_ isa ErrorException
             println(err, "corset: ", error_.msg)
-            return Cint(2)
+            return 2
         end
         rethrow()
     end
 end
 
 """`run_command` on the process's standard streams, as they are when the command starts."""
-(@main)(args::AbstractVector{<:AbstractString})::Cint = run_command(args, stdout, stderr) # lint: hidden-input
+(@main)(args::AbstractVector{<:AbstractString})::Int = run_command(args, stdout, stderr) # lint: hidden-input

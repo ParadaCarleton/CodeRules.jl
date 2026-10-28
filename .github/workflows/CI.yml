@@ -26,12 +26,29 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/julia-processcoverage@v1
+      - name: Require 100% line coverage
+        if: matrix.version == '1.13'
+        run: |
+          sudo apt-get install -y lcov
+          lcov --summary lcov.info 2>&1 | tee summary.txt
+          grep -Eq 'lines\.*: 100\.0%' summary.txt
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
       - run: fatou lint --color never src test
+  corset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - run: julia --project=. -e 'using Corset; exit(Corset.main(ARGS))' -- check . --no-load --deny-warnings
   format:
     runs-on: ubuntu-latest
     steps:
