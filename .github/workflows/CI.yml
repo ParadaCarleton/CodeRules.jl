@@ -31,7 +31,8 @@ jobs:
         if: matrix.version == '1.13'
         run: |
           sudo apt-get install -y lcov
-          lcov --summary --fail-under-lines 100 lcov.info
+          lcov --summary lcov.info 2>&1 | tee summary.txt
+          grep -Eq 'lines\.*: 100\.0%' summary.txt
   lint:
     runs-on: ubuntu-latest
     steps:

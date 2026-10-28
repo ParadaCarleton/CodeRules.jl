@@ -323,7 +323,7 @@ function abstract_local_type(inferred::Any)::Bool
     elseif type isa Union
         members = Base.uniontypes(type)
         return length(members) > UNION_SPLIT_LIMIT || any(abstract_local_type, members)
-    elseif type isa DataType && type.name === Base.unwrap_unionall(Type).name
+    elseif type isa DataType && type <: Type
         return false
     elseif type isa DataType && type <: Tuple && length(type.parameters) == 1 && Base.isvarargtype(only(type.parameters))
         return abstract_local_type(only(type.parameters).T)
