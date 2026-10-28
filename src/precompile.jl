@@ -1,6 +1,7 @@
 # Compiles the `check` path while Corset precompiles, so a run of `corset` reuses the cached code
 # and spends its time and memory on the project, not on the compiler.
 
+# fatou-ignore unused-import: the macro expansion names the module
 using PrecompileTools: PrecompileTools, @compile_workload
 
 """A package for the precompile workload to check: it holds one finding for a module rule to report."""
