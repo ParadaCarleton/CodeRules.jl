@@ -517,7 +517,7 @@ end
         method = only(methods(closure_chain.uses_macro))
         code = Corset.lowered(method)
         @test any(index -> Corset.statement_line(code, method, index) == method.line, eachindex(code.code))
-        @test Corset.slot_line(Corset.Inferred(method, code, Any), 2) == method.line
+        @test Corset.slot_line(Corset.Inferred(method, code, false), 2) == method.line
     end
     @testset "a builtin has no lowered code and returns no argument's call" begin
         @test isnothing(Corset.lowered(first(methods(Core.tuple))))

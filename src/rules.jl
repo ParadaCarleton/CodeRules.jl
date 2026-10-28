@@ -236,13 +236,13 @@ function hidden_inputs(mod::Module)::Vector{Site}
 end
 
 """
-A method of the package with its unoptimized typed code and the return type inference found for it
-(widened to a plain type, so a constant result `nothing` reads as `Nothing`).
+A method of the package with its unoptimized typed code and whether inference found its return type
+to be `Nothing` (after widening, so a constant result `nothing` counts).
 """
 struct Inferred
     method::Method
     code::Core.CodeInfo
-    result::Type
+    returns_nothing::Bool
 end
 
 """
@@ -270,7 +270,7 @@ locals to report and is left out.
 """
 function inferred_methods(mod::Module)::Vector{Inferred}
     return [
-        Inferred(method, code, Core.Compiler.widenconst(result))
+        Inferred(method, code, Core.Compiler.widenconst(result) === Nothing)
             for method in module_methods(mod)
             for signature in typed_signatures(method)
             for (code, result) in Base.code_typed_by_type(signature; optimize = false)
@@ -425,7 +425,7 @@ argument (`returns_argument_call`) gets no verdict: its callers' arguments decid
 function is_unmarked_effect(repository::Repository, item::Inferred)::Bool # lint: abstract-local  lowered IR statements are untyped
     function_type = Base.unwrap_unionall(item.method.sig).parameters[1]
     name = string(item.method.name)
-    return item.result === Nothing &&
+    return item.returns_nothing &&
         !startswith(name, "#") &&
         !endswith(name, "!") &&
         function_type isa DataType &&
@@ -447,7 +447,7 @@ function unmarked_effects( # lint: abstract-local  lowered IR statements are unt
     valued = Set(
         (item.method.module, item.method.name)
             for item in inferred
-            if item.result !== Nothing
+            if !item.returns_nothing
     )
     return unique(
         [
