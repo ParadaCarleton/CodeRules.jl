@@ -64,12 +64,13 @@ function interpolated_names(text::AbstractString)::Vector{String}
     names = String[]
     position = findfirst('$', text)
     while !isnothing(position)
-        escaped = position > firstindex(text) && text[prevind(text, position)] == '\\'
+        escaped::Bool = position > firstindex(text) && text[prevind(text, position)] == '\\'
         if escaped || position == lastindex(text)
             position = findnext('$', text, nextind(text, position))
             continue
         end
-        atom, stop = SYNTAX.parseatom(SYNTAX.SyntaxNode, text, nextind(text, position))
+        parsed::Tuple{SYNTAX.SyntaxNode, Int} = SYNTAX.parseatom(SYNTAX.SyntaxNode, text, nextind(text, position))
+        atom, stop = parsed
         append!(names, name_tokens(atom))
         position = findnext('$', text, stop)
     end
@@ -149,7 +150,7 @@ function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::
         prefix = keyword * " " * strip(text[SYNTAX.byte_range(first(parts))]) * ": "
         item_nodes = parts[2:end]
     end
-    items = [ImportItem(item_name(item), strip(text[SYNTAX.byte_range(item)])) for item in item_nodes]
+    items::Vector{ImportItem} = [ImportItem(item_name(item), strip(text[SYNTAX.byte_range(item)])) for item in item_nodes]
     line = first(SYNTAX.source_location(node))
     opted_out = occursin(IMPORT_OPT_OUT, join(lines[max(1, line - 1):line], "\n"))
     bytes = SYNTAX.byte_range(node)
@@ -217,8 +218,12 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     elseif path == "" || !isfile(path)
         return [ImportFile("", "", Set{String}(), ImportStatement[], String[], false)]
     end
-    file = get(() -> import_file(path, false), known, path)
-    below = vcat(seen, [path])
+    file::ImportFile = if haskey(known, path)
+        known[path]
+    else
+        import_file(path, false)
+    end
+    below::Vector{String} = vcat(seen, [path])
     return vcat([file], ImportFile[found for child in file.includes for found in unit_files(child, known, below)])
 end
 
@@ -252,10 +257,10 @@ end
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
 function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove}
-    known = Dict(file.path => file for file in files)
-    included = Set(path for file in files for path in file.includes)
+    known::Dict{String, ImportFile} = Dict(file.path => file for file in files)
+    included::Set{String} = Set(path for file in files for path in file.includes)
     units = [unit_files(file.path, known, String[]) for file in files if !(file.path in included)]
-    membership = Dict(path => count(unit -> any(file -> file.path == path, unit), units) for path in keys(known))
+    membership::Dict{String, Int} = Dict(path => count(unit -> any(file -> file.path == path, unit), units) for path in keys(known))
     return [move for unit in units for move in unit_moves(unit) if membership[move.file] == 1 && all(target -> get(membership, target, 0) == 1, move.targets)]
 end
 
@@ -285,7 +290,7 @@ is_blank(byte::Unsigned)::Bool = byte == UInt8(' ') || byte == UInt8('\t')
 
 """The edit taking `removed` items out of `statement` in `bytes`: the statement rewritten, or its whole lines deleted when nothing stays."""
 function removal_edit(bytes::AbstractVector{UInt8}, statement::ImportStatement, removed::AbstractVector{ImportItem})::Pair{UnitRange{Int}, String}
-    kept = [item.text for item in statement.items if !(item in removed)]
+    kept::Vector{String} = [item.text for item in statement.items if !(item in removed)]
     if !isempty(kept)
         return (statement.first_byte:statement.last_byte) => statement.prefix * join(kept, ", ")
     end
@@ -298,7 +303,7 @@ end
 
 """The edit adding `items` (prefix => item text) to `file`: after its last import, at that import's indent, or at the top of a file with none."""
 function addition_edit(file::ImportFile, items::AbstractVector{Pair{String, String}})::Pair{UnitRange{Int}, String}
-    statements = [prefix * join(unique(text for (owner, text) in items if owner == prefix), ", ") for prefix in unique(first.(items))]
+    statements::Vector{String} = [prefix * join(unique(text for (owner, text) in items if owner == prefix), ", ") for prefix in unique(first.(items))]
     if isempty(file.statements)
         if occursin(r"^\s*(bare)?module\s"m, file.text)
             error("$(file.path) holds a module but no import to place $(statements) beside")
@@ -316,21 +321,28 @@ end
 """The text of `file` after `moves`: its moved items taken out, and the items moved to it added."""
 function placed_text(file::ImportFile, moves::AbstractVector{ImportMove})::String
     bytes = codeunits(file.text)
-    own = [move for move in moves if move.file == file.path]
-    removals = [
+    own::Vector{ImportMove} = [move for move in moves if move.file == file.path]
+    removals::Vector{Pair{UnitRange{Int}, String}} = [
         removal_edit(bytes, statement, [move.item for move in own if move.statement === statement])
             for statement in file.statements if any(move -> move.statement === statement, own)
     ]
-    added = [move.statement.prefix => move.item.text for move in moves if file.path in move.targets]
+    added::Vector{Pair{String, String}} = [move.statement.prefix => move.item.text for move in moves if file.path in move.targets]
     additions = Pair{UnitRange{Int}, String}[]
     if !isempty(added)
         additions = [addition_edit(file, added)]
     end
-    edits = sort(vcat(removals, additions); by = edit -> first(first(edit)), rev = true)
-    return foldl(edits; init = file.text) do text, (range, replacement)
-        source = codeunits(text)
-        String(vcat(source[1:(first(range) - 1)], codeunits(replacement), source[(last(range) + 1):end]))
+    edits::Vector{Pair{UnitRange{Int}, String}} = sort(vcat(removals, additions); by = edit -> first(first(edit)), rev = true)
+    text::String = file.text
+    for (range, replacement) in edits
+        text = splice_text(text, range, replacement)
     end
+    return text
+end
+
+"""The text `text` with the bytes of `range` replaced by `replacement`."""
+function splice_text(text::T, range::UnitRange{Int}, replacement::AbstractString)::String where {T <: AbstractString}
+    source = codeunits(text)
+    return String(vcat(source[1:(first(range) - 1)], codeunits(replacement), source[(last(range) + 1):end]))
 end
 
 """

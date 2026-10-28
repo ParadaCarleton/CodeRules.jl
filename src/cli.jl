@@ -220,9 +220,9 @@ end
 function print_findings(
         io::IO,
         root::AbstractString,
-        findings::AbstractVector{Finding},
+        findings::AbstractVector{F},
         format::AbstractString,
-    )::Nothing
+    )::Nothing where {F <: Finding}
     if format == "json"
         records = [
             (;

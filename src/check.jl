@@ -40,7 +40,7 @@ function judge(
         sites::AbstractVector{Site},
         update::Bool,
     )::Vector{Finding}
-    name = rule_name(rule)
+    name::String = rule_name(rule)
     over = disallowed_keys(repository, name, sites, update)
     return [
         Finding(name, level, site)
@@ -64,11 +64,17 @@ enabled_rules(config::Config)::Tuple = Tuple(
 )
 
 """Run the fixer of every fixable rule in `rules` over the files `context` names."""
+apply_fixes!(::Tuple{}, ::Context)::Nothing = nothing
+
 function apply_fixes!(rules::Tuple, context::Context)::Nothing
-    for rule in rules
-        if fixable(rule)
-            fix!(rule, context)
-        end
+    apply_fix!(first(rules), context)
+    return apply_fixes!(Base.tail(rules), context)
+end
+
+"""Run the fixer of `rule` over the files `context` names, when `rule` has one."""
+function apply_fix!(rule::Rule, context::Context)::Nothing
+    if fixable(rule)
+        fix!(rule, context)
     end
     return nothing
 end
