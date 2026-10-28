@@ -8,7 +8,7 @@ makedocs(;
     modules = [Corset],
     checkdocs_ignored_modules = [Corset.WorkloadPackage],
     format = Documenter.HTML(canonical = "https://paradacarleton.github.io/Corset.jl/stable", size_threshold_warn = 200 * 1024),
-    pages = ["Home" => "index.md", "Guide" => "guide.md", "Rules" => "rules.md", "API" => "api.md"],
+    pages = ["Home" => "index.md", "Guide" => "guide.md", "CLI" => "cli.md", "Rules" => "rules.md", "API" => "api.md"],
     warnonly = false,
 )
 
