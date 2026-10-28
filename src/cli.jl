@@ -188,6 +188,8 @@ Corset's own environment stays on the load path after the project's, so the proj
 dependencies win. Where `execv` does not exist the command runs as a child and its exit code is returned.
 """
 function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Cint
+    # COV_EXCL_START
+    # execv replaces the process before it can write its coverage
     ENV[INNER_VARIABLE] = "1"
     ENV["JULIA_LOAD_PATH"] = join(
         ["@", dirname(Base.active_project()), "@stdlib"],
@@ -203,6 +205,7 @@ function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString}):
         ccall(:execv, Cint, (Cstring, Ptr{Ptr{UInt8}}), strings[1], argv)
     end
     error("execv failed: $(Libc.strerror(Libc.errno()))")
+    # COV_EXCL_STOP
 end
 
 """The path of `site` relative to `root`; empty for a site with no file."""
@@ -284,7 +287,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     end
     loads = reads_package(config) && !options.no_load
     if loads && !haskey(ENV, INNER_VARIABLE)
-        return relaunch(root, args)
+        return relaunch(root, args) # COV_EXCL_LINE
     end
     mod = nothing
     if loads

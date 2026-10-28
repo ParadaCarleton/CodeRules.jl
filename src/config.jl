@@ -50,7 +50,7 @@ function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Pr
         if error_ isa Union{InvalidKeyError, FieldTypeConversionError}
             error("[$(join(path, "."))] in $file: $(sprint(showerror, error_))")
         end
-        rethrow()
+        rethrow() # COV_EXCL_LINE
     end
 end
 

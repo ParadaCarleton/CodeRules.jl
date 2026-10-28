@@ -241,6 +241,23 @@ end
     @test setdiff(pedantic, reporting) == String[]
 end
 
+@testset "corset: JET sites need the caller's JET" begin
+    @test_throws ErrorException Corset.loaded_jet(Dict{Base.PkgId, Module}())
+    @test Corset.loaded_jet() isa Module
+end
+
+"""An output stream whose every write throws `failure`."""
+struct FailingStream{E <: Exception} <: IO
+    failure::E
+end
+Base.write(stream::FailingStream, ::String)::Nothing = throw(stream.failure)
+
+@testset "corset: a write failure ends the run" begin
+    root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
+    @test Corset.run_command(["rules", root], FailingStream(Base.IOError("write", Base.UV_EPIPE)), devnull) == 0
+    @test_throws DomainError Corset.run_command(["rules", root], FailingStream(DomainError(1)), devnull)
+end
+
 @testset "corset: a closed output pipe ends the run quietly" begin
     @test Corset.broken_pipe(Base.IOError("write", Base.UV_EPIPE))
     @test !Corset.broken_pipe(Base.IOError("write", Base.UV_EIO))

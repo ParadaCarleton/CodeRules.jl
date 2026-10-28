@@ -283,6 +283,8 @@ end
 @testset "short-form `where` binds the method, not the return annotation" begin
     @test fix_where_returns("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
         "(f(x::V{E})::Vector{E}) where {E<:Real} = x\n"
+    @test fix_where_returns("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
+        "(f(x::V{E}, 1)::Vector{E}) where {E} = x\n"
     @testset "no argument uses the variable, so the annotation may be deliberate" begin
         kept = "g()::Vector{T} where {T} = T[]\n"
         @test fix_where_returns(kept) == kept
