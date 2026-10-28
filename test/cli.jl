@@ -164,14 +164,16 @@ end
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
-    @testset "where-return handles unbraced where T" begin
+    @testset "where-return handles unbraced where T and unbound arguments" begin
         unbraced = package_tree(
             "name = \"Demo\"\n",
-            ["src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\nend\n"],
+            [
+                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x)::T where {T} = convert(T, x)\nend\n",
+            ],
         )
         findings, _ = run_rules(load_config(unbraced), unbraced)
-        @test !isempty(findings)
-        @test only(findings).rule == "where-return"
+        @test length(findings) == 2
+        @test all(finding -> finding.rule == "where-return", findings)
     end
 
     @testset "module rules run on a loaded package" begin
