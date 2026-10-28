@@ -27,7 +27,12 @@ end
 function binds_an_argument(signature::SYNTAX.SyntaxNode)::Bool
     call, annotation = SYNTAX.children(signature)
     clause = SYNTAX.children(annotation)[2]
-    introduced = [first(identifier_names(variable)) for variable in SYNTAX.children(clause)]
+    children = SYNTAX.children(clause)
+    introduced = if isnothing(children)
+        identifier_names(clause)
+    else
+        [first(identifier_names(variable)) for variable in children]
+    end
     return !isdisjoint(introduced, identifier_names(call))
 end
 

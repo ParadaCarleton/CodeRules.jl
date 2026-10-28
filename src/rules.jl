@@ -1294,7 +1294,11 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
 end
 
 """One site per one-letter variable name in the Julia file `path`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
-function one_letter_sites(repository::Repository, path::AbstractString)::Vector{Site}
+function one_letter_sites(
+        repository::Repository,
+        path::AbstractString,
+        located::AbstractVector{Located} = located_source(path),
+    )::Vector{Site}
     return [
         Site(
             "$(basename(path)) $(item.enclosing)",
@@ -1303,7 +1307,7 @@ function one_letter_sites(repository::Repository, path::AbstractString)::Vector{
                 item.line :
                 definition_line(item.node, item.line),
         )
-            for item in located_source(path)
+            for item in located
             for _ in one_letter_names(item.node, repository.one_letter_exempt)
     ]
 end

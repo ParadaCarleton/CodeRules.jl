@@ -129,6 +129,13 @@ end
             update_baseline = true,
         )
         @test occursin("where-return", read(joinpath(seeded, "base.toml"), String))
+
+        nested = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\nbaseline = \"sub/base.toml\"\n",
+            SOURCE_TREE,
+        )
+        run_rules(load_config(nested), nested; update_baseline = true)
+        @test isfile(joinpath(nested, "sub", "base.toml"))
     end
 
     @testset "--fix rewrites the file for the rules that have a fixer" begin
@@ -155,6 +162,21 @@ end
         )
         @test captured_main(["check", clean, "--diff"]) == ("", 0)
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
+    end
+
+    @testset "where-return handles unbraced where T and unbound arguments" begin
+        unbraced = package_tree(
+            "name = \"Demo\"\n",
+            [
+                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x)::T where {T} = convert(T, x)\nend\n",
+            ],
+        )
+        @test length(run_rules(load_config(unbraced), unbraced)[1]) == 2
+        findings, _ = run_rules(load_config(unbraced), unbraced; fix = true)
+        @test length(findings) == 1
+        @test only(findings).rule == "where-return"
+        @test occursin("(f(x::T)::T) where T = x", read(joinpath(unbraced, "src", "Demo.jl"), String))
+        @test occursin("g(x)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
     end
 
     @testset "module rules run on a loaded package" begin
