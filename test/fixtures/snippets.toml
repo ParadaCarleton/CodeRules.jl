@@ -71,6 +71,15 @@ sized(count::Integer)::Int = Int(@ccall strlen("a"::Cstring)::Csize_t)
 via_base()::Int = Base.Cint(1)
 '''
 
+[ref]
+source = '''
+make()::Int = Ref(0)[]
+typed(box::Base.RefValue{Int})::Int = box[]
+quoted()::Symbol = :Ref
+pid()::Int = Int(ccall(:getpid, Cint, (Ref{Cint},), C_NULL))
+generic(box::Ref{Int})::Int = box[]
+'''
+
 [annotation]
 source = '''
 untyped(value) = value
