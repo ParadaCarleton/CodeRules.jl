@@ -42,6 +42,9 @@ end
 struct SolverControls
     solver_tolerance::Int
 end
+mutable struct Tally
+    total::Int
+end
 
 broken(value::Int)::Int = value + "one"
 unstable(box::Base.RefValue{Any})::Int = box[] + 1

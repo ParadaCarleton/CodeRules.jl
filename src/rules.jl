@@ -547,6 +547,9 @@ module_structs(mod::Module)::Vector{DataType} = unique(
     ]
 )
 
+"""The `module_structs` of `mod` declared mutable."""
+mutable_structs(mod::Module)::Vector{DataType} = filter(ismutabletype, module_structs(mod))
+
 """
 Fields of `type` declared with an abstract type (not a type parameter, not a `Union`), or
 with a concrete container of one: `Vector{Any}`, `Base.RefValue{Any}` and

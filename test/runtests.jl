@@ -143,7 +143,8 @@ end
 
     @testset "abstract-field, repeated-prefix: struct fields" begin
         structs = Dict(nameof(type) => type for type in module_structs(fixture))
-        @test Set(keys(structs)) == Set([:Holder, :Plain, :SolverControls])
+        @test Set(keys(structs)) == Set([:Holder, :Plain, :SolverControls, :Tally])
+        @test nameof.(Corset.mutable_structs(fixture)) == [:Tally]
         @test abstract_fields(structs[:Holder]) == [:held]
         @test isempty(abstract_fields(structs[:Plain]))
         @test repeated_prefix(structs[:SolverControls]) == "solver"
