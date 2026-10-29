@@ -511,16 +511,19 @@ function live_closure_types(mod::Module)::Vector{DataType}
     ]
 end
 
-"""Each `live_closure_types` closure of `mod` that captures data (a closure type with fields), as a `closure_site`."""
-function capturing_closures(mod::Module)::Vector{Site}
+"""Each `live_closure_types` closure of `mod` matching `predicate`, as a `closure_site`."""
+function matching_closures(predicate::Function, mod::Module)::Vector{Site}
     world = Base.get_world_counter()
     namers = closure_namers(mod, defined_methods(mod))
     return [
         closure_site(type, closure_definer(type.name, namers), world)
             for type in live_closure_types(mod)
-            if fieldcount(type) > 0
+            if predicate(type)
     ]
 end
+
+"""Each `live_closure_types` closure of `mod` that captures data (a closure type with fields), as a `closure_site`."""
+capturing_closures(mod::Module)::Vector{Site} = matching_closures(type -> fieldcount(type) > 0, mod)
 
 """
 Each `live_closure_types` closure of `mod` holding a `Core.Box`: a captured variable that the
@@ -528,15 +531,7 @@ closure or its definer rebinds, so every read of it is dynamically typed and the
 The closure ratchet counts capturing closures per file and function against a baseline, so a counted closure that
 gains a Box goes unseen there; a Box is never tolerated.
 """
-function boxed_closures(mod::Module)::Vector{Site}
-    world = Base.get_world_counter()
-    namers = closure_namers(mod, defined_methods(mod))
-    return [
-        closure_site(type, closure_definer(type.name, namers), world)
-            for type in live_closure_types(mod)
-            if Core.Box in fieldtypes(type)
-    ]
-end
+boxed_closures(mod::Module)::Vector{Site} = matching_closures(type -> Core.Box in fieldtypes(type), mod)
 
 """Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
 module_structs(mod::Module)::Vector{DataType} = unique(
@@ -619,17 +614,8 @@ end
 
 """The name a parsed function definition `node` defines, or `nothing` when `node` defines none."""
 function defined_name(node::Expr)::Union{Symbol, Nothing} # lint: abstract-local  Expr nodes hold untyped arguments
-    if !(node.head in (:function, :(=))) || isempty(node.args)
-        return nothing
-    end
-    signature = node.args[1]
-    while signature isa Expr && signature.head in (:where, :(::))
-        signature = signature.args[1]
-    end
-    if signature isa Expr && signature.head === :call
-        return Symbol(string(signature.args[1]))
-    end
-    return nothing
+    call = signature_call(node)
+    return isnothing(call) ? nothing : Symbol(string(call.args[1]))
 end
 
 """The declared return type of parsed function definition `node`, or `nothing` when it declares none."""
@@ -1086,6 +1072,16 @@ const CONCRETE_RETURN_FIX =
     "or `(f(x::T)::T) where {T} = …` on one line), `typeof(x)`, or an abstract type " *
     "(`AbstractVector{E}`, `AbstractMatrix{E}`, never `Vector{E}` or `Matrix{E}`)"
 
+"""A `Site` at the definition lines of `item.node` in `path`, keyed by file basename and defined name."""
+function definition_site(path::AbstractString, item::Located)::Site
+    return Site(
+        "$(basename(path)) $(defined_name(item.node))",
+        path,
+        first(definition_lines(item.node, item.line)),
+        last(definition_lines(item.node, item.line)),
+    )
+end
+
 """
 Methods whose declared return type names a concrete type (`names_concrete_type`), one site per
 method at its signature, keyed by file and function name: a result type must be generic, annotated by
@@ -1098,12 +1094,7 @@ function concrete_returns(
         scope::Module,
     )::Vector{Site}
     return [
-        Site(
-            "$(basename(path)) $(defined_name(item.node))",
-            path,
-            first(definition_lines(item.node, item.line)),
-            last(definition_lines(item.node, item.line)),
-        )
+        definition_site(path, item)
             for item in located
             if !isnothing(signature_call(item.node)) &&
             length(item.node.args) >= 2 &&
@@ -1246,12 +1237,7 @@ function missing_annotations(
         located::AbstractVector{Located},
     )::Vector{Site}
     return [
-        Site(
-            "$(basename(path)) $(defined_name(item.node))",
-            path,
-            first(definition_lines(item.node, item.line)),
-            last(definition_lines(item.node, item.line)),
-        )
+        definition_site(path, item)
             for item in located
             if lacks_annotation(item.node)
     ]
