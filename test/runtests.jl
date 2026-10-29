@@ -554,6 +554,10 @@ module Probe
         entries = Vector{E}(undef, length(point) + extra)
         return Buffer(entries)
     end
+    function matches(texts::AbstractVector{<:AbstractString})::Int
+        positions = findall(==("x"), texts)
+        return length(positions)
+    end
     function passing(thunk::F) where {F}
         try
             return thunk()
@@ -571,6 +575,7 @@ end
     Probe.each_part(identity, 2)
     Probe.each_part(string, 2)
     Probe.passing(() -> nothing)
+    Probe.matches(["x", "y"])
     Probe.Buffer(Float32[1, 2], 1)
     repository = Repository(@__DIR__)
     inferred = inferred_methods(Probe)
