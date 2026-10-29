@@ -419,7 +419,8 @@ end
 """
 Whether `item` is a named function of `repository`, not a closure or another package's function
 (`Base.show`, a keyword call), that inference types as always returning `nothing` yet whose name
-does not end in `!`: it exists for its effect, so its name says so. A method returning a call to its
+does not end in `!`: it exists for its effect, so its name says so. `__init__` is exempt, since Julia
+fixes its name. A method returning a call to its
 argument (`returns_argument_call`) gets no verdict: its callers' arguments decide its result.
 """
 function is_unmarked_effect(repository::Repository, item::Inferred)::Bool # lint: abstract-local  lowered IR statements are untyped
@@ -428,6 +429,7 @@ function is_unmarked_effect(repository::Repository, item::Inferred)::Bool # lint
     return item.returns_nothing &&
         !startswith(name, "#") &&
         !endswith(name, "!") &&
+        name != "__init__" &&
         function_type isa DataType &&
         function_type <: Function &&
         function_type.name.module === item.method.module &&

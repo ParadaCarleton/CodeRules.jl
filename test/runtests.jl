@@ -543,6 +543,7 @@ module Probe
             return nothing
         end
     end
+    __init__()::Nothing = nothing
     function each_part(body::B, parts::Integer)::Nothing where {B}
         foreach(body, 1:parts)
         return nothing
@@ -572,6 +573,7 @@ end
     Probe.off(nothing)
     Probe.off(1.0f0)
     Probe.catches()
+    Probe.__init__()
     Probe.each_part(identity, 2)
     Probe.each_part(string, 2)
     Probe.passing(() -> nothing)
@@ -586,6 +588,7 @@ end
         keys = [site.key for site in unmarked_effects(repository, inferred)]
         @test !any(contains("off"), keys)
         @test any(contains("catches"), keys)
+        @test !any(contains("__init__"), keys)
     end
     @testset "a generic procedure called with several types is one site" begin
         keys = [site.key for site in unmarked_effects(repository, inferred)]
