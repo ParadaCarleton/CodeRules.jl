@@ -39,10 +39,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
       - run: fatou lint --color never src test
+      - run: jscpd --exit-code --mode mild --min-lines 5 --min-tokens 50 src test
   corset:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"
