@@ -54,6 +54,8 @@ place each site with `struct_site(name, struct_locations(files))`.
 - `repeated_prefix` finds field names that repeat a word the type should say once. Fields
   `continuation_step` and `continuation_theta` belong in a `ContinuationControls`.
 
+`mutable-struct` (pedantic) reports every `ismutabletype(T)` struct of `module_structs(mod)`.
+Repair: return the changed data from the function that computes it and keep the struct immutable.
 A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` over
 `module_structs(mod)`.
 
