@@ -107,9 +107,9 @@ boxed_closures(context.mod)
     [struct_site(nameof(type), locations) for type in module_structs(context.mod) if !isempty(abstract_fields(type))]
 end
 
-@rule ModuleRule "mutable-struct" :pedantic "structs declared with the mutable keyword" context -> begin
+@rule ModuleRule "mutable-struct" :default "structs declared with the mutable keyword" context -> begin
     locations = declared(context)
-    [struct_site(nameof(type), locations) for type in module_structs(context.mod) if ismutabletype(type)]
+    [struct_site(nameof(type), locations) for type in mutable_structs(context.mod)]
 end
 
 @rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context -> begin
