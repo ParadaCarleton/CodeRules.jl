@@ -139,6 +139,9 @@ float64_sites(path)
 @rule FileRule "c-type" :pedantic "C-interop types (Cint, Cdouble, ...) outside a ccall" (context, path, located) ->
 c_type_sites(path)
 
+@rule FileRule "ref" :pedantic "Ref and RefValue outside a ccall, state carried by reference" (context, path, located) ->
+ref_sites(path)
+
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, path, located) ->
 one_letter_sites(context.repository, path, located)
 

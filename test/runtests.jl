@@ -222,6 +222,10 @@ end
         @test site_lines(c_type_sites(snippet_file("c-type"))) == [1, 1]
     end
 
+    @testset "ref: Ref and RefValue outside a ccall" begin
+        @test site_lines(Corset.ref_sites(snippet_file("ref"))) == [1, 2, 5]
+    end
+
     @testset "annotation: every argument and result annotated" begin
         @test site_keys(found_in(missing_annotations, "annotation")) == ["source.jl untyped", "source.jl no_result"]
     end
