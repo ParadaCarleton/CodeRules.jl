@@ -1357,6 +1357,64 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
     return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2])) for found in findings if !isnothing(found)]
 end
 
+"""
+One site per duplicate code block found by `jscpd` over `directories` of `repository`, keyed by
+the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
+installed and on PATH; an execution failure throws.
+"""
+function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
+        repository::Repository,
+        directories::Tuple{Vararg{String}},
+    )::Vector{Site}
+    jscpd = Sys.which("jscpd")
+    if isnothing(jscpd)
+        error("jscpd is not on PATH; the jscpd rule runs `jscpd`")
+    end
+    dirs = present_directories(repository, directories)
+    if isempty(dirs)
+        return Site[]
+    end
+    report_dir = mktempdir()
+    try
+        flags = String["--silent", "--no-tips", "--absolute", "--reporters", "json", "--output", report_dir]
+        if !isempty(repository.skipped_directories)
+            push!(flags, "--ignore", join(["**/$d/**" for d in repository.skipped_directories], ","))
+        end
+        command = Cmd(
+            `$jscpd $flags $(collect(dirs))`;
+            dir = repository.root,
+        )
+        printed = IOBuffer()
+        run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
+        report_file = joinpath(report_dir, "jscpd-report.json")
+        if !isfile(report_file)
+            unread = String(take!(printed))
+            error("jscpd produced no report:\n$unread")
+        end
+        json = Base.require(@__MODULE__, :JSON)
+        report = Base.invokelatest(json.parsefile, report_file; dicttype = Dict{String, Any})
+        duplicates = get(report, "duplicates", Any[])
+        sites = Site[]
+        for duplicate in duplicates
+            raw_first = string(duplicate["firstFile"]["name"])
+            raw_second = string(duplicate["secondFile"]["name"])
+            first_file = isabspath(raw_first) ? raw_first : joinpath(repository.root, raw_first)
+            second_file = isabspath(raw_second) ? raw_second : joinpath(repository.root, raw_second)
+            rel_first = relpath(first_file, repository.root)
+            rel_second = relpath(second_file, repository.root)
+            start_line = Int(duplicate["secondFile"]["start"])
+            end_line = Int(duplicate["secondFile"]["end"])
+            push!(
+                sites,
+                Site("$rel_second $rel_first", second_file, start_line, end_line),
+            )
+        end
+        return sites
+    finally
+        rm(report_dir; recursive = true, force = true)
+    end
+end
+
 """A `Site` keyed `name` at the declaration of struct `name`."""
 function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site
     file, line = get(locations, name, ("", 0))
