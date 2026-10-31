@@ -4,7 +4,7 @@ using Test: @testset, @test, @test_logs, @test_throws
 using JET: JET
 using TOML: TOML
 using Corset: Corset
-using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, abstract_fields, abstract_locals,
+using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     boxed_closures, c_type_sites, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
@@ -680,3 +680,101 @@ end
 end
 
 include("cli.jl")
+
+@testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin
+    write_scan(text::AbstractString)::String = joinpath(
+        write_tree(mktempdir(), ["scan.jl" => text]),
+        "scan.jl",
+    )
+    planted = write_scan("@testset \"f\" begin\n x = 1\n @test x + absent_name == 2\nend\n")
+    unresolved, unlowered = undefined_names(planted; scope = @__MODULE__)
+    @test unresolved == ["line 1: `absent_name`"]
+    @test isempty(unlowered)
+    near_miss = write_scan("@testset \"f\" begin\n x = 1\n @test x + x == 2\nend\n")
+    @test undefined_names(near_miss; scope = @__MODULE__) == (String[], String[])
+    # A name the file defines, imports or takes from an include is defined; a `@changeprecision` wrapper is entered.
+    defined = write_scan(
+        "using Test: @test\nhelper(x) = x\n@changeprecision Float32 @testset \"f\" begin\n @test helper(1) == 1\nend\n",
+    )
+    @test first(undefined_names(defined; scope = @__MODULE__)) == String[]
+    root = write_tree(
+        mktempdir(),
+        [
+            "included.jl" => "from_include() = 1\n",
+            "main.jl" =>
+                "include(\"included.jl\")\n@testset \"f\" begin\n @test from_include() == 1\n @test missing_one == 2\nend\n",
+        ],
+    )
+    @test first(undefined_names(joinpath(root, "main.jl"); scope = @__MODULE__)) ==
+        ["line 2: `missing_one`"]
+    # A testset whose macro cannot expand here is unscanned, and says so.
+    broken = write_scan("@testset \"f\" begin\n @no_such_macro 1\nend\n")
+    @test undefined_names(broken; scope = @__MODULE__)[2] == ["line 1"]
+    # Testsets inside `let`/`begin` are found; `as` aliases and declared types are defined.
+    nested = write_scan(
+        "using Test: @test\nimport Base: sum as total\nstruct Box end\nabstract type Shape end\n" *
+            "let\n @testset \"f\" begin\n @test total([1]) == 1\n @test Box() isa Box\n @test Shape isa Type\n @test gone == 1\n end\nend\n",
+    )
+    @test first(undefined_names(nested; scope = @__MODULE__)) == ["line 6: `gone`"]
+    # Includes nest, resolve against the includer's directory, and a cycle ends.
+    deep = write_tree(
+        mktempdir(),
+        [
+            "sub/inner.jl" => "include(\"leaf.jl\")\ninclude(\"inner.jl\")\n",
+            "sub/leaf.jl" => "leaf_name() = 1\n",
+            "main.jl" =>
+                "include(joinpath(@__DIR__, \"sub\", \"inner.jl\"))\n@testset \"f\" begin\n @test leaf_name() == 1\nend\n",
+        ],
+    )
+    @test first(undefined_names(joinpath(deep, "main.jl"); scope = @__MODULE__)) == String[]
+    # `where` signatures define functions; a `#` inside a name is no excuse; self-includes through `..` end.
+    where_scan = write_scan(
+        "f(x::T) where {T} = x\n@testset \"f\" begin\n @test f(1) == 1\n @test var\"gone#name\" == 1\nend\n",
+    )
+    @test first(undefined_names(where_scan; scope = @__MODULE__)) == ["line 2: `gone#name`"]
+    # The annotation of a typed assignment is a use, not a definition.
+    annotated = write_scan("@testset \"f\" begin\n x::GoneType = 1\n @test x == 1\nend\n")
+    @test first(undefined_names(annotated; scope = @__MODULE__)) == ["line 1: `GoneType`"]
+    # A qualified `Test.@testset` is scanned; a dotted import binds its last name.
+    qualified = write_scan("Test.@testset \"f\" begin\n gone_name == 1\nend\n")
+    @test first(undefined_names(qualified; scope = @__MODULE__)) == ["line 1: `gone_name`"]
+    dotted = write_scan(
+        "import Base.FastMath\nusing Base.Iterators\n@testset \"f\" begin\n @test FastMath isa Module\n @test Iterators isa Module\n @test take isa Function\nend\n",
+    )
+    @test first(undefined_names(dotted; scope = @__MODULE__)) == String[]
+    # `@enum` binds its type and members, in a line or a `begin` block, with values and a base type.
+    enums = write_scan(
+        "@enum Color red blue = 2\n@enum Shade::UInt8 begin\n dark\n light = 3\nend\n@testset \"f\" begin\n @test red isa Color\n @test blue == blue\n @test dark isa Shade\n @test light isa Shade\n @test gone_member == 1\nend\n",
+    )
+    @test first(undefined_names(enums; scope = @__MODULE__)) == ["line 6: `gone_member`"]
+    # A macro the scan has never seen may define any symbol among its arguments; test and logging macros define none.
+    unknown = write_scan(
+        "@never_seen_macro made_by_macro other = 1\n@testset \"f\" begin\n @test made_by_macro isa Any\n @test other == 1\n @test_throws ErrorException gone_name\n @info gone_logged\nend\n",
+    )
+    @test first(undefined_names(unknown; scope = @__MODULE__)) == ["line 2: `gone_logged`", "line 2: `gone_name`"]
+    loop = write_tree(
+        mktempdir(),
+        [
+            "sub/inner.jl" =>
+                "include(joinpath(@__DIR__, \"..\", \"sub\", \"inner.jl\"))\n",
+            "main.jl" => "include(joinpath(@__DIR__, \"sub\", \"inner.jl\"))\n",
+        ],
+    )
+    @test undefined_names(joinpath(loop, "main.jl"); scope = @__MODULE__) ==
+        (String[], String[])
+    # Imports of whole modules, destructuring, `where` return types, parametric structs and body imports are all definitions.
+    forms = write_scan(
+        "using Corset\nimport Test\nusing NoSuchModuleAnywhere\nleft, (right, _) = 1, (2, 3)\ntyped_binding::Int = 1\nfunction no_methods end\n" *
+            "function typed(x::T)::Int where {T}\n 1\nend\nstruct Wrapped{T} <: Any end\n" *
+            "@testset \"f\" begin\n using Test: @test\n @test typed(left) + right + typed_binding == 4 && no_methods isa Function\n @test Wrapped{Int} isa Type\n" *
+            " @test Test.detect_ambiguities isa Function && undefined_names isa Function\n @test include(joinpath(@__DIR__, left)) == 1\nend\n",
+    )
+    @test first(undefined_names(forms; scope = @__MODULE__)) == String[]
+    # An include argument that is not a literal path is never evaluated.
+    marker = joinpath(mktempdir(), "ran")
+    lazy = write_scan(
+        "include(write($(repr(marker)), \"x\") |> string)\n@testset \"f\" begin\n @test 1 == 1\nend\n",
+    )
+    undefined_names(lazy; scope = @__MODULE__)
+    @test !isfile(marker)
+end
