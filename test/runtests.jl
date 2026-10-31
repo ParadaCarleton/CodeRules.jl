@@ -9,7 +9,7 @@ using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
-    where_return_sites
+    where_return_sites, entry_signatures, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
 
 const FIXTURES = joinpath(@__DIR__, "fixtures")
 const SNIPPETS = TOML.parsefile(joinpath(FIXTURES, "snippets.toml"))
@@ -568,6 +568,12 @@ module Probe
         return length(positions)
     end
     idle()::Nothing = nothing
+    struct Marker end
+    struct Wrapped{M}
+        marker::M
+    end
+    @noinline inner(point::Marker)::Int = 1
+    outer(point::Marker)::Int = inner(point) + 1
     function passing(thunk::F) where {F}
         try
             return thunk()
@@ -617,6 +623,51 @@ end
         @test [item.method for item in cold] == [item.method for item in warm]
         @test [item.method.name for item in warm] == [:generic]
         @test [item.code.slottypes for item in cold] == [item.code.slottypes for item in warm]
+    end
+end
+
+@testset "entry_signatures walks :invoke edges from the seeds and reads nothing the session ran" begin
+    outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
+    inner_call = Tuple{typeof(Probe.inner), Probe.Marker}
+    @testset "a noinline callee is followed, the seed is kept, and the answer does not depend on what ran" begin
+        cold = entry_signatures(Type[outer_call], Probe)
+        Probe.outer(Probe.Marker())
+        @test Set(entry_signatures(Type[outer_call], Probe)) == Set(cold)
+        @test outer_call in cold && inner_call in cold
+        @test length(cold) == length(unique(cold))
+    end
+    @testset "a seed with no callee in the module is its own walk" begin
+        @test entry_signatures(Type[inner_call], Probe) == Type[inner_call]
+    end
+    @testset "frame_callees keeps the callees naming the target and drops the others" begin
+        code = only(Base.code_typed_by_type(outer_call; optimize = true)).first
+        @test frame_callees(code, Probe) == Type[inner_call]
+        @test isempty(frame_callees(code, Base))
+    end
+    @testset "mentions_module reads unions, where-types and nested parameters, to a depth limit" begin
+        @test mentions_module(Probe.Marker, Probe, 0)
+        @test mentions_module(Union{Probe.Marker, Int}, Probe, 0)
+        @test mentions_module(Union{Int, Probe.Marker}, Probe, 0)
+        @test mentions_module(Probe.Wrapped{Probe.Marker}, Probe, 0)
+        @test mentions_module(Tuple{Vector{Probe.Marker}}, Probe, 0)
+        @test mentions_module(Probe.Wrapped{M} where {M}, Probe, 0)
+        @test !mentions_module(Vector{Int}, Probe, 0)
+        @test !mentions_module(1, Probe, 0)
+        @test !mentions_module(Union{Int, Float32}, Probe, 0)
+        @test !mentions_module(Probe.Marker, Probe, 7)
+    end
+    @testset "builtin_callee, invoked_instance and logging_call read each statement shape" begin
+        @test builtin_callee(Core.tuple) && builtin_callee(Core.Intrinsics.add_int)
+        @test builtin_callee(GlobalRef(Core, :tuple))
+        @test !builtin_callee(GlobalRef(Core, :no_such_name))
+        @test !builtin_callee(Probe.inner)
+        instance = only(Base.specializations(only(methods(Probe.inner))))
+        @test invoked_instance(instance) === instance
+        @test invoked_instance(instance.cache) === instance
+        @test invoked_instance("neither") === nothing
+        @test logging_call(Expr(:call, GlobalRef(Base.CoreLogging, :handle_message)))
+        @test logging_call(Expr(:call, Base.CoreLogging.handle_message))
+        @test !logging_call(Expr(:call, :plain))
     end
 end
 

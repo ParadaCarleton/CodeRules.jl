@@ -11,6 +11,7 @@ export Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_
 
 include("ratchet.jl")
 include("rules.jl")
+include("entry_walk.jl")
 include("jet.jl")
 include("float64_scan.jl")
 include("imports.jl")
