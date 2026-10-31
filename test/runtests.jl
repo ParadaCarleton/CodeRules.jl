@@ -572,7 +572,9 @@ module Probe
     struct Wrapped{M}
         marker::M
     end
-    @noinline inner(point::Marker)::Int = 1
+    # `inner` must not be foldable: `outer` must keep an `:invoke` edge to it. A constant body
+    # folds away when coverage is off (CI also runs that way), and the walk then finds no callee.
+    @noinline inner(point::Marker)::Int = Int(time_ns() % 1) + 1
     outer(point::Marker)::Int = inner(point) + 1
     function passing(thunk::F) where {F}
         try
