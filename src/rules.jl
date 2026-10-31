@@ -225,7 +225,7 @@ constants, keyed by the global and placed at the statement that reads it.
 """
 function hidden_inputs(mod::Module)::Vector{Site}
     return [
-        Site(string(read.name), string(method.file), statement_line(code, method, index))
+        Site(string(read.name), string(method.file), statement_line(code, method, index), "")
             for method in module_methods(mod)
             for code in (lowered(method),)
             if code isa Core.CodeInfo
@@ -348,6 +348,18 @@ function method_key(method::Method)::String
 end
 
 """
+One site per key, file and lines of `sites`, in first-seen order, its detail the sorted details of all the sites it replaces,
+so neither the specialization order nor a second variable on the line changes what the log says.
+"""
+function one_per_line(sites::AbstractVector{Site})::Vector{Site}
+    places = unique([(site.key, site.file, site.line, site.last_line) for site in sites])
+    return [
+        Site(place..., join(sort!(unique([site.detail for site in sites if (site.key, site.file, site.line, site.last_line) == place])), "; "))
+            for place in places
+    ]
+end
+
+"""
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
 `abstract_local_type`, one site per variable however many specializations ran. A method a macro generated in another package's file
 (`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables.
@@ -356,9 +368,9 @@ function abstract_locals(
         repository::Repository,
         inferred::AbstractVector{Inferred},
     )::Vector{Site}
-    return unique(
+    return one_per_line(
         [
-            Site(method_key(item.method), string(item.method.file), slot_line(item, index))
+            Site(method_key(item.method), string(item.method.file), slot_line(item, index), "local `$name`::$type")
                 for item in inferred
                 if startswith(string(item.method.file), repository.root)
                 for (index, (name, type)) in enumerate(
@@ -435,7 +447,7 @@ function unmarked_effects( # lint: abstract-local  lowered IR statements are unt
     )
     return unique(
         [
-            Site(method_key(item.method), string(item.method.file), item.method.line)
+            Site(method_key(item.method), string(item.method.file), item.method.line, "")
                 for item in inferred
                 if is_unmarked_effect(repository, item) &&
                 !((item.method.module, item.method.name) in valued)
@@ -478,7 +490,7 @@ function closure_site(type::DataType, definer::Method, world::Integer)::Site # l
     if !isempty(matches) && first(matches).method.file !== :none
         placed = first(matches).method
     end
-    return Site(method_key(definer), string(placed.file), placed.line)
+    return Site(method_key(definer), string(placed.file), placed.line, "")
 end
 
 """The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
@@ -740,6 +752,7 @@ function nothing_returns(path::AbstractString, located::AbstractVector{Located})
             path,
             first(definition_lines(item.node, item.line)),
             last(definition_lines(item.node, item.line)),
+            "",
         )
             for item in located
             if !isnothing(defined_name(item.node)) &&
@@ -752,11 +765,11 @@ function range_guards(path::AbstractString, located::AbstractVector{Located})::V
     sites = Site[]
     for item in located
         if is_range_guard(item.node)
-            push!(sites, Site(string(item.enclosing), path, item.line))
+            push!(sites, Site(string(item.enclosing), path, item.line, ""))
         end
         for argument in item.node.args
             if argument isa Real && is_range_guard(argument)
-                push!(sites, Site(string(item.enclosing), path, item.line))
+                push!(sites, Site(string(item.enclosing), path, item.line, ""))
             end
         end
     end
@@ -781,7 +794,7 @@ function repeated_statements( # lint: abstract-local  Expr nodes hold untyped ar
             elseif argument isa Expr
                 statement = without_lines(argument)
                 if statement in seen
-                    push!(sites, Site("$(item.enclosing): $statement", path, line))
+                    push!(sites, Site("$(item.enclosing): $statement", path, line, ""))
                 end
                 push!(seen, statement)
             end
@@ -795,7 +808,7 @@ function return_type_calls(path::AbstractString, located::AbstractVector{Located
         Site,
     }
     return [
-        Site(basename(path), path, item.line)
+        Site(basename(path), path, item.line, "")
             for item in located
             if item.node.head === :. &&
             length(item.node.args) == 2 &&
@@ -935,7 +948,7 @@ function concrete_arguments(path::AbstractString, located::AbstractVector{Locate
             for (name, annotation) in annotated_arguments(argument)
                 if is_concrete_container(annotation) &&
                         !(body isa Expr && resizes(body, name))
-                    push!(sites, Site(basename(path), path, first(span), last(span)))
+                    push!(sites, Site(basename(path), path, first(span), last(span), ""))
                 end
             end
         end
@@ -1064,6 +1077,7 @@ function definition_site(path::AbstractString, item::Located)::Site
         path,
         first(definition_lines(item.node, item.line)),
         last(definition_lines(item.node, item.line)),
+        "",
     )
 end
 
@@ -1114,7 +1128,7 @@ function float64_sites!(
                 kind === IDENTIFIER_KIND &&
                     Symbol(SYNTAX.sourcetext(node)) in FLOAT64_NAMES
             )
-            push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node))))
+            push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node)), ""))
         end
         return nothing
     end
@@ -1168,7 +1182,7 @@ function name_sites(
     kind = SYNTAX.kind(node)
     if SYNTAX.is_leaf(node)
         if kind === IDENTIFIER_KIND && Symbol(SYNTAX.sourcetext(node)) in names
-            return [Site(basename(path), path, first(SYNTAX.source_location(node)))]
+            return [Site(basename(path), path, first(SYNTAX.source_location(node)), "")]
         end
         return Site[]
     end
@@ -1292,6 +1306,7 @@ function one_letter_sites(
             isnothing(signature_call(item.node)) ?
                 item.line :
                 definition_line(item.node, item.line),
+            "",
         )
             for item in located
             for _ in one_letter_names(item.node, repository.one_letter_exempt)
@@ -1336,11 +1351,11 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
     if !isempty(unread)
         error("fatou lint printed lines that are no finding:\n" * join(unread, "\n"))
     end
-    return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2])) for found in findings if !isnothing(found)]
+    return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2]), "") for found in findings if !isnothing(found)]
 end
 
 """A `Site` keyed `name` at the declaration of struct `name`."""
 function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site
     file, line = get(locations, name, ("", 0))
-    return Site(string(name), file, line)
+    return Site(string(name), file, line, "")
 end

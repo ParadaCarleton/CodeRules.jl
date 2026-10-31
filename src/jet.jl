@@ -20,7 +20,7 @@ function jet_site(scope::String, report::Any)::Site # lint: abstract-local  JET 
     frame = last(report.vst)
     method = frame.linfo.def
     name = method isa Method ? method.name : :top_level
-    return Site("$scope: $name $(nameof(typeof(report)))", string(frame.file), frame.line)
+    return Site("$scope: $name $(nameof(typeof(report)))", string(frame.file), frame.line, "")
 end
 
 """One site per report of JET analysis `result`."""

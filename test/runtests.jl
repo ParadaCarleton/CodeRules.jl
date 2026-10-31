@@ -78,17 +78,19 @@ end
 
     @testset "without a baseline every offender's key is past it" begin
         repository = Repository(mktempdir())
-        sites = [Site("first", "", 0), Site("second", "", 0), Site("second", "", 0)]
+        sites = [Site("first", "", 0, ""), Site("second", "", 0, ""), Site("second", "", 0, "")]
         @test (@test_logs (:error, r"rule: offenders past no baseline") offenders!(repository, "rule", sites)) == ["first", "second"]
         @test ratchet!(repository, "rule", Site[]) == String[]
+        described = [Site("first", "", 0, "local `x`::Any"), Site("first", "", 0, "local `y`::Any"), Site("second", "", 0, "")]
+        @test (@test_logs (:error, r"first = 2 \(local `x`::Any; local `y`::Any\)\nsecond = 1\n?$") offenders!(repository, "rule", described)) == ["first", "second"]
     end
 
     @testset "a `# lint:` comment opts its lines out" begin
         text = "one() = 1 # lint: rule\ntwo() = 2\n# lint: rule-begin\nthree() = 3\n# lint: rule-end\nfour() = 4 # lint: other\n"
         root = write_tree(mktempdir(), ["source.jl" => text, "whole.jl" => "# lint: rule-file\none() = 1\n"])
-        sites = [Site("line $line", joinpath(root, "source.jl"), line) for line in 1:6]
+        sites = [Site("line $line", joinpath(root, "source.jl"), line, "") for line in 1:6]
         @test offenders!(Repository(root), "rule", sites) == ["line 2", "line 6"]
-        @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2)]))
+        @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2, "")]))
     end
 
     @testset "with a baseline each key is held to its entry, and entries fall" begin
@@ -96,15 +98,15 @@ end
         baseline = joinpath(root, "baseline.toml")
         write(baseline, "")
         repository = Repository(root; baseline)
-        sites = [Site("counted", "", 0), Site("counted", "", 0), Site("noted", "", 0)]
+        sites = [Site("counted", "", 0, ""), Site("counted", "", 0, ""), Site("noted", "", 0, "")]
         @test isempty(@test_logs (:warn, r"seeded") offenders!(repository, "rule", sites))
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2, "noted" => 1)
         write(baseline, "[rule]\ncounted = 2\nnoted = \"kept: deliberate\"\n")
-        @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0)]))
-        @test offenders!(repository, "rule", [sites; Site("counted", "", 0)]) == ["counted"]
-        @test offenders!(repository, "rule", [Site("fresh", "", 0)]; scopes = ("noted",)) == ["fresh"]
+        @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0, "")]))
+        @test offenders!(repository, "rule", [sites; Site("counted", "", 0, "")]) == ["counted"]
+        @test offenders!(repository, "rule", [Site("fresh", "", 0, "")]; scopes = ("noted",)) == ["fresh"]
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2)
-        @test ratchet!(repository, "rule", [Site("counted", "", 0)]) == String[]
+        @test ratchet!(repository, "rule", [Site("counted", "", 0, "")]) == String[]
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1)
     end
 
@@ -127,6 +129,10 @@ end
     @testset "abstract-local: a local variable that infers no concrete type" begin
         @test site_keys(abstract_locals(repository, inferred)) == ["fixture.jl abstract_local"]
         @test isempty(abstract_locals(Repository(mktempdir()), inferred))
+        @test occursin(r"^local `holder`::Vector.*Any", only(abstract_locals(repository, inferred)).detail)
+        twins = [Site("k", "f", 3, "local `a`::Any"), Site("k", "f", 3, "local `b`::Any"), Site("k", "f", 3, "local `a`::Integer"), Site("k", "f", 4, "local `c`::Any")]
+        @test [site.detail for site in Corset.one_per_line(twins)] == ["local `a`::Any; local `a`::Integer; local `b`::Any", "local `c`::Any"]
+        @test [site.detail for site in Corset.one_per_line(reverse(twins))] == ["local `c`::Any", "local `a`::Any; local `a`::Integer; local `b`::Any"]
     end
 
     @testset "bang: a function that always returns nothing has a name ending in !" begin
@@ -153,7 +159,7 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(:Holder, struct_locations([path])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)))
+        @test struct_site(:Holder, struct_locations([path])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
@@ -200,6 +206,7 @@ end
         sites = found_in(repeated_statements, "repeated-statement")
         @test length(sites) == 1
         @test startswith(only(sites).key, "twice: ")
+        @test length(only(sites).key) > length("twice: ")
         @test only(sites).line == 3
     end
 
@@ -246,7 +253,7 @@ end
         path = ENV["PATH"]
         ENV["PATH"] = "$bin:$path"
         try
-            @test fatou_sites(Repository(tree), (".",)) == [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3)]
+            @test fatou_sites(Repository(tree), (".",)) == [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3, "")]
             fake_fatou(bin, "checked 1 file(s): clean\\n")
             @test isempty(fatou_sites(Repository(tree), (".",)))
             fake_fatou(bin, "source.jl: parse error\\n")

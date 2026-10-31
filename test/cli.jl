@@ -206,14 +206,14 @@ end
     @test sprint(
         print_findings,
         root,
-        [Finding("jet", :deny, Corset.Site("scope", "", 0))],
+        [Finding("jet", :deny, Corset.Site("scope", "", 0, ""))],
         "human",
     ) ==
         "deny[jet]: scope\n"
 
     @test exit_code(findings, false) == 0
     @test exit_code(findings, true) == 1
-    @test exit_code([Finding("x", :deny, Corset.Site("k", "", 0))], false) == 1
+    @test exit_code([Finding("x", :deny, Corset.Site("k", "", 0, ""))], false) == 1
     @test exit_code(Finding[], true) == 0
 
     @test occursin("where-return", sprint(print_rules, load_config(root)))

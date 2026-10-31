@@ -37,15 +37,18 @@ Repository(
 """
 One offender a rule found: `key` names it in the baseline; `file` (a path, empty when the offender
 has none) and the lines `line` through `last_line` place it for the opt-out comments, so a comment on
-any of them takes the site out. Line 0 places it in the file as a whole.
+any of them takes the site out. Line 0 places it in the file as a whole. `detail` tells the reader of the
+log what the offender is (a variable and its type, say); a rule with nothing to add passes `""`, and
+the constructors have no default so no rule forgets it.
 """
 struct Site
     key::String
     file::String
     line::Int
     last_line::Int
+    detail::String
 end
-Site(key::String, file::String, line::Integer) = Site(key, file, line, line)
+Site(key::String, file::String, line::Integer, detail::String) = Site(key, file, line, line, detail)
 
 """
 `# lint: RULE` opts its own line out of `RULE`, `# lint: RULE-begin` … `# lint: RULE-end` the lines
@@ -130,11 +133,30 @@ function write_baseline!(baseline::Baseline, path::AbstractString)::String
     return mv(staged, path; force = true)
 end
 
-"""Log `over`, the keys of `measured` past what `allowance` names allows, with `fix` (how to repair one) when given, and return it."""
-function logged_over(rule::String, measured::AbstractDict{String, Int}, over::AbstractVector{String}, allowance::String, fix::String)::Vector{String}
+"""The `detail`s of the sites under each key, sorted and joined; a key none of whose sites has one is absent."""
+function detail_lines(sites::AbstractVector{S})::Dict{String, String} where {S <: Site}
+    described = [site for site in sites if !isempty(site.detail)]
+    return Dict{String, String}(
+        key => join(sort!(unique([site.detail for site in described if site.key == key])), "; ") for key in unique([site.key for site in described])
+    )
+end
+
+"""The parenthesized detail that follows `key` in the log, empty when `key` has none."""
+function detail_suffix(details::AbstractDict{String, String}, key::String)::String
+    if haskey(details, key)
+        return " ($(details[key]))"
+    end
+    return ""
+end
+
+"""Log `over`, the keys of `measured` past what `allowance` names allows, each with its `details`, and with `fix` (how to repair one) when given; return `over`."""
+function logged_over(
+        rule::String, measured::AbstractDict{String, Int}, details::AbstractDict{String, String}, over::AbstractVector{String}, allowance::String, fix::String,
+    )::Vector{String}
     if !isempty(over)
         advice = ifelse(isempty(fix), "", "\nFix: $fix")
-        @error "$rule: offenders past $allowance:\n" * join(["$key = $(measured[key])" for key in over], "\n") * advice
+        lines = ["$key = $(measured[key])" * detail_suffix(details, key) for key in over]
+        @error "$rule: offenders past $allowance:\n" * join(lines, "\n") * advice
     end
     return over
 end
@@ -194,7 +216,7 @@ function offenders!(
     end
     baseline_file = repository.baseline
     if isnothing(baseline_file)
-        return logged_over(rule, measured, sort!(collect(keys(measured))), "no baseline", fix)
+        return logged_over(rule, measured, detail_lines(kept), sort!(collect(keys(measured))), "no baseline", fix)
     end
     # ponytail: testsets on separate processes may rewrite at once; the rename is atomic, so
     # one lowering can be lost (the baseline stays higher, never wrong) and the next run redoes it.
@@ -221,7 +243,7 @@ function offenders!(
         write_baseline!(baseline, path)
         @info "$rule fell: baseline lowered in $path" improved
     end
-    return logged_over(rule, measured, over, "the baseline in $path", fix)
+    return logged_over(rule, measured, detail_lines(kept), over, "the baseline in $path", fix)
 end
 
 """

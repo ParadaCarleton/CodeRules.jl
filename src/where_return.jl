@@ -43,7 +43,7 @@ Push a `Site` for each short-form definition under `node` whose `where` binds th
 """
 function where_return_sites!(sites::AbstractVector{Site}, path::AbstractString, node::SYNTAX.SyntaxNode)::Nothing
     if is_where_return(node)
-        push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node))))
+        push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node)), ""))
     end
     if !SYNTAX.is_leaf(node)
         for child in SYNTAX.children(node)

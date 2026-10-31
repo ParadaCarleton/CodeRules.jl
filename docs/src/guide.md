@@ -3,7 +3,8 @@
 ## The pieces
 
 A **rule** is a function from code to a vector of [`Site`](@ref)s. A site has a `key` (the name of
-the offender, such as `"Demo.jl total"`), a file and a line.
+the offender, such as `"Demo.jl total"`), a file, a line and a `detail` (what the offender is, such as
+``local `x`::Any``; `""` when the key says it all). The log of a failing rule prints each key's details.
 
 A **[`Repository`](@ref)** is the tree the rules read, plus the settings that relax them.
 
