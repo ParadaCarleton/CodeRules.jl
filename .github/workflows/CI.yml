@@ -34,6 +34,11 @@ jobs:
           lcov --summary lcov.info 2>&1 | tee summary.txt
           awk '/^SF:/ {file = substr($0, 4)} /^DA:[0-9]+,0$/ {print "uncovered:", file, substr($0, 4)}' lcov.info
           grep -Eq 'lines\.*: 100\.0%' summary.txt
+      # Coverage blocks inlining and constant folding; users run without it.
+      - uses: julia-actions/julia-runtest@v1
+        if: matrix.version == '1.13'
+        with:
+          coverage: false
   lint:
     runs-on: ubuntu-latest
     steps:
