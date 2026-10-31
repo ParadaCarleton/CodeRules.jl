@@ -257,7 +257,7 @@ function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # l
 end
 
 """One site per move, keyed by file and name, at the import's line."""
-import_sites(moves::AbstractVector{ImportMove})::Vector{Site} = [Site("$(basename(move.file)) $(move.item.name)", move.file, move.statement.line) for move in moves]
+import_sites(moves::AbstractVector{ImportMove})::Vector{Site} = [Site("$(basename(move.file)) $(move.item.name)", move.file, move.statement.line, "") for move in moves]
 
 """The Julia files of `directories` in `repository`, parsed for import placement."""
 import_files(repository::Repository, directories::Tuple{Vararg{String}})::Vector{ImportFile} =
