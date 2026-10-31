@@ -69,24 +69,37 @@ function frame_callees(code::Core.CodeInfo, target::Module)::Vector{Type}
 end
 
 """
-    entry_signatures(seeds, target)
+    entry_frames(seeds, target)
 
-Every signature reachable from `seeds` (entry-point call signatures such as `Tuple{typeof(f), Int}`)
-along `frame_callees` edges, the seeds included. Pass it to `inferred_methods`: it names the frames
-the entry points compile, whatever the session ran before.
+The optimized frames (`code_typed_by_type` results, empty when inference yields none) of every signature
+reachable from `seeds` (entry-point call signatures such as `Tuple{typeof(f), Int}`) along
+`frame_callees` edges, the seeds included. A caller that audits the frames reads them from here and
+infers nothing twice.
 """
-function entry_signatures(seeds::AbstractVector{<:Type}, target::Module)::Vector{Type}
-    seen = Type[]
+function entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Dict{Type, Vector{Pair{Core.CodeInfo, Any}}}
+    frames = Dict{Type, Vector{Pair{Core.CodeInfo, Any}}}()
     frontier = unique(Type[seeds...])
     while !isempty(frontier)
-        seen = union(seen, frontier)
-        frontier = unique(filter(!in(seen), next_frames(frontier, target)))
+        for signature in frontier
+            frames[signature] = Pair{Core.CodeInfo, Any}[Base.code_typed_by_type(signature; optimize = true)...]
+        end
+        frontier = new_callees(frames, frontier, target)
     end
-    return seen
+    return frames
 end
 
-"""The signatures the frames of `frontier` call through followed `:invoke` edges, duplicates included."""
-next_frames(frontier::AbstractVector{<:Type}, target::Module)::Vector{Type} = Type[
-    callee for signature in frontier for (code, _) in Base.code_typed_by_type(signature; optimize = true)
-        for callee in frame_callees(code, target)
-]
+"""The signatures the `frontier` frames call that `frames` does not hold yet."""
+new_callees(frames::AbstractDict{Type}, frontier::AbstractVector{<:Type}, target::Module)::Vector{Type} = unique(
+    Type[
+        callee for signature in frontier for (code, _) in frames[signature]
+            for callee in frame_callees(code, target) if !haskey(frames, callee)
+    ],
+)
+
+"""
+    entry_signatures(seeds, target)
+
+The signatures of `entry_frames(seeds, target)`. Pass them to `inferred_methods`: they name the frames
+the entry points compile, whatever the session ran before.
+"""
+entry_signatures(seeds::AbstractVector{<:Type}, target::Module)::Vector{Type} = collect(keys(entry_frames(seeds, target)))
