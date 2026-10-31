@@ -745,6 +745,11 @@ include("cli.jl")
         "@enum Color red blue = 2\n@enum Shade::UInt8 begin\n dark\n light = 3\nend\n@testset \"f\" begin\n @test red isa Color\n @test blue == blue\n @test dark isa Shade\n @test light isa Shade\n @test gone_member == 1\nend\n",
     )
     @test first(undefined_names(enums; scope = @__MODULE__)) == ["line 6: `gone_member`"]
+    # A macro the scan has never seen may define any symbol among its arguments; test and logging macros define none.
+    unknown = write_scan(
+        "@never_seen_macro made_by_macro other = 1\n@testset \"f\" begin\n @test made_by_macro isa Any\n @test other == 1\n @test_throws ErrorException gone_name\n @info gone_logged\nend\n",
+    )
+    @test first(undefined_names(unknown; scope = @__MODULE__)) == ["line 2: `gone_logged`", "line 2: `gone_name`"]
     loop = write_tree(
         mktempdir(),
         [

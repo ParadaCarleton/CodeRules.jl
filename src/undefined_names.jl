@@ -50,7 +50,21 @@ function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     return declaration
 end
 
-"""Add the type and every member that `@enum`'s `arguments` bind: `Color::Int`, `red`, `blue = 2`, alone or in a `begin` block."""
+const READING_MACROS = (
+    Symbol("@assert"), Symbol("@inferred"), Symbol("@show"), Symbol("@info"), Symbol("@warn"), Symbol("@error"),
+    Symbol("@debug"), Symbol("@time"), Symbol("@elapsed"), Symbol("@allocated"), Symbol("@__DIR__"),
+)
+
+"""Whether macro `name` only reads its arguments (a test, logging or timing macro), so a bare symbol among them binds nothing."""
+function reads_only(name::Symbol)::Bool
+    return startswith(String(name), "@test") || name in READING_MACROS
+end
+
+"""
+Add the names the arguments of a macro the scan does not know could bind, so a name only such a
+macro defines (`@enum`, `@kwdef`, `@eval`) is never reported: every bare symbol, `x::T` and `x = v`
+target among `arguments`, alone or in a `begin` block.
+"""
 function enum_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
         names,
         arguments,
@@ -127,7 +141,7 @@ function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are
         push!(names, declared_name(node.args[2]))
     elseif node.head in (:abstract, :primitive)
         push!(names, declared_name(first(node.args)))
-    elseif node.head === :macrocall && first(node.args) === Symbol("@enum")
+    elseif node.head === :macrocall && !reads_only(macro_name(first(node.args)))
         enum_names!(names, node.args[(begin + 1):end])
     end
     for child in node.args
@@ -264,14 +278,21 @@ function module_globals!( # lint: abstract-local  walks Julia ASTs, whose nodes 
     return names
 end
 
+"""The macro a macrocall's head `name` calls, unqualified (`Test.@testset` gives `@testset`); `Symbol("")` for any other head."""
+function macro_name( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+        name,
+    )::Symbol
+    if name isa Expr && name.head === :. && last(name.args) isa QuoteNode
+        name = last(name.args).value
+    end
+    return ifelse(name isa Symbol, name, Symbol(""))
+end
+
 """Whether `name` is `@testset` or a qualified spelling of it such as `Test.@testset`."""
 function is_testset_macro( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
         name,
     )::Bool
-    if name isa Expr && name.head === :. && last(name.args) isa QuoteNode
-        name = last(name.args).value
-    end
-    return name === Symbol("@testset")
+    return macro_name(name) === Symbol("@testset")
 end
 
 """The `(line, node)` of every `@testset` under `node`, wherever a block, `let` or wrapper macro puts it; a testset's own body is not searched."""
