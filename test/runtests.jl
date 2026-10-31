@@ -740,6 +740,11 @@ include("cli.jl")
         "import Base.FastMath\nusing Base.Iterators\n@testset \"f\" begin\n @test FastMath isa Module\n @test Iterators isa Module\n @test take isa Function\nend\n",
     )
     @test first(undefined_names(dotted; scope = @__MODULE__)) == String[]
+    # `@enum` binds its type and members, in a line or a `begin` block, with values and a base type.
+    enums = write_scan(
+        "@enum Color red blue = 2\n@enum Shade::UInt8 begin\n dark\n light = 3\nend\n@testset \"f\" begin\n @test red isa Color\n @test blue == blue\n @test dark isa Shade\n @test light isa Shade\n @test gone_member == 1\nend\n",
+    )
+    @test first(undefined_names(enums; scope = @__MODULE__)) == ["line 6: `gone_member`"]
     loop = write_tree(
         mktempdir(),
         [

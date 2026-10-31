@@ -50,6 +50,23 @@ function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     return declaration
 end
 
+"""Add the type and every member that `@enum`'s `arguments` bind: `Color::Int`, `red`, `blue = 2`, alone or in a `begin` block."""
+function enum_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+        names,
+        arguments,
+    )
+    for argument in arguments
+        if argument isa Expr && argument.head === :block
+            enum_names!(names, argument.args)
+        elseif argument isa Expr && argument.head === :(=)
+            assigned_names!(names, first(argument.args))
+        else
+            assigned_names!(names, argument)
+        end
+    end
+    return names
+end
+
 """Add every name an assignment to `target` binds: `x`, `x::T`, and tuples of those, nested."""
 function assigned_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
         names,
@@ -110,6 +127,8 @@ function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are
         push!(names, declared_name(node.args[2]))
     elseif node.head in (:abstract, :primitive)
         push!(names, declared_name(first(node.args)))
+    elseif node.head === :macrocall && first(node.args) === Symbol("@enum")
+        enum_names!(names, node.args[(begin + 1):end])
     end
     for child in node.args
         bound_names!(names, child)
