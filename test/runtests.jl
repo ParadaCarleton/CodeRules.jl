@@ -9,7 +9,7 @@ using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
-    where_return_sites, entry_signatures, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
+    where_return_sites, entry_signatures, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
 
 const FIXTURES = joinpath(@__DIR__, "fixtures")
 const SNIPPETS = TOML.parsefile(joinpath(FIXTURES, "snippets.toml"))
@@ -635,6 +635,12 @@ end
         @test Set(entry_signatures(Type[outer_call], Probe)) == Set(cold)
         @test outer_call in cold && inner_call in cold
         @test length(cold) == length(unique(cold))
+    end
+    @testset "entry_frames holds each signature's optimized frame, empty where inference yields none" begin
+        nothing_typed = Tuple{typeof(Probe.inner), String}
+        frames = entry_frames(Type[outer_call, nothing_typed], Probe)
+        @test Set(keys(frames)) == Set([outer_call, inner_call, nothing_typed])
+        @test length(frames[outer_call]) == 1 && isempty(frames[nothing_typed])
     end
     @testset "a seed with no callee in the module is its own walk" begin
         @test entry_signatures(Type[inner_call], Probe) == Type[inner_call]
