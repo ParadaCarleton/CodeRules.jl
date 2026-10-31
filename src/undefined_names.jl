@@ -59,7 +59,10 @@ function assigned_names!( # lint: abstract-local  walks Julia ASTs, whose nodes 
 )
     if target isa Symbol
         push!(names, target)
-    elseif target isa Expr && target.head in (:tuple, :(::), :parameters)
+    elseif target isa Expr && target.head === :(::)
+        # Only the left side binds; the annotation is a use.
+        assigned_names!(names, first(target.args))
+    elseif target isa Expr && target.head in (:tuple, :parameters)
         for element in target.args
             assigned_names!(names, element)
         end

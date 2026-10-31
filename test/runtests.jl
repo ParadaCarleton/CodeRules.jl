@@ -861,6 +861,9 @@ include("cli.jl")
         "f(x::T) where {T} = x\n@testset \"f\" begin\n @test f(1) == 1\n @test var\"gone#name\" == 1\nend\n",
     )
     @test first(undefined_names(where_scan; scope = @__MODULE__)) == ["line 2: `gone#name`"]
+    # The annotation of a typed assignment is a use, not a definition.
+    annotated = write_scan("@testset \"f\" begin\n x::GoneType = 1\n @test x == 1\nend\n")
+    @test first(undefined_names(annotated; scope = @__MODULE__)) == ["line 1: `GoneType`"]
     loop = write_tree(
         mktempdir(),
         [
