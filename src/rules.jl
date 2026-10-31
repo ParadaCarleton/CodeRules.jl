@@ -794,7 +794,7 @@ function repeated_statements( # lint: abstract-local  Expr nodes hold untyped ar
             elseif argument isa Expr
                 statement = without_lines(argument)
                 if statement in seen
-                    push!(sites, Site("$(item.enclosing): ", path, line, ""))
+                    push!(sites, Site("$(item.enclosing): $statement", path, line, ""))
                 end
                 push!(seen, statement)
             end

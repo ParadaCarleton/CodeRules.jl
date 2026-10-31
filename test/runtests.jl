@@ -206,6 +206,7 @@ end
         sites = found_in(repeated_statements, "repeated-statement")
         @test length(sites) == 1
         @test startswith(only(sites).key, "twice: ")
+        @test length(only(sites).key) > length("twice: ")
         @test only(sites).line == 3
     end
 
