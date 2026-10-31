@@ -24,10 +24,7 @@ function write_tree(root::AbstractString, files::AbstractVector{<:Pair})::String
 end
 
 """The path of `source.jl` holding the snippet of `rule` (`fixtures/snippets.toml`), in a fresh tree."""
-snippet_file(rule::AbstractString)::String = joinpath(
-    write_tree(mktempdir(), ["source.jl" => SNIPPETS[rule]["source"]]),
-    "source.jl",
-)
+snippet_file(rule::AbstractString)::String = joinpath(write_tree(mktempdir(), ["source.jl" => SNIPPETS[rule]["source"]]), "source.jl")
 
 """The `Site`s that `finder(path, located)` finds in the snippet of `rule`."""
 function found_in(finder::Function, rule::AbstractString)::Vector{Site}
@@ -43,13 +40,7 @@ site_lines(sites::AbstractVector{Site})::Vector{Int} = [site.line for site in si
 
 """A module loaded from `fixtures/fixture_module.txt`, written as `fixture.jl` in the tree `root`."""
 function load_fixture(root::AbstractString)::Module
-    path = joinpath(
-        write_tree(
-            root,
-            ["fixture.jl" => read(joinpath(FIXTURES, "fixture_module.txt"), String)],
-        ),
-        "fixture.jl",
-    )
+    path = joinpath(write_tree(root, ["fixture.jl" => read(joinpath(FIXTURES, "fixture_module.txt"), String)]), "fixture.jl")
     fixture = Module(:Fixture)
     Base.include(fixture, path)
     return fixture
@@ -59,10 +50,7 @@ end
 concrete_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in Corset.module_methods(mod) if Base.isdispatchtuple(method.sig)]
 
 """The files `repository_sources` finds under `src` of `repository`, relative to `root`."""
-relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [
-    relpath(file, root)
-    for file in repository_sources(repository, ("src",))
-]
+relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [relpath(file, root) for file in repository_sources(repository, ("src",))]
 
 """Install in `bin` a `fatou` that prints `printed` (a `printf` format) and return `bin`."""
 function fake_fatou(bin::AbstractString, printed::AbstractString)::String
@@ -76,10 +64,7 @@ function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     repository = Repository(write_tree(mktempdir(), files))
     place_imports!(repository, (".",))
     @test isempty(misplaced_imports(repository, (".",)))
-    return Dict(
-        name => read(joinpath(repository.root, name), String)
-        for (name, _) in files
-    )
+    return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
 @testset "Corset" begin
@@ -94,30 +79,16 @@ end
     @testset "without a baseline every offender's key is past it" begin
         repository = Repository(mktempdir())
         sites = [Site("first", "", 0), Site("second", "", 0), Site("second", "", 0)]
-        @test (
-            @test_logs (:error, r"rule: offenders past no baseline") offenders!(
-                repository,
-                "rule",
-                sites,
-            )
-        ) ==
-            ["first", "second"]
+        @test (@test_logs (:error, r"rule: offenders past no baseline") offenders!(repository, "rule", sites)) == ["first", "second"]
         @test ratchet!(repository, "rule", Site[]) == String[]
     end
 
     @testset "a `# lint:` comment opts its lines out" begin
         text = "one() = 1 # lint: rule\ntwo() = 2\n# lint: rule-begin\nthree() = 3\n# lint: rule-end\nfour() = 4 # lint: other\n"
-        root = write_tree(
-            mktempdir(),
-            ["source.jl" => text, "whole.jl" => "# lint: rule-file\none() = 1\n"],
-        )
+        root = write_tree(mktempdir(), ["source.jl" => text, "whole.jl" => "# lint: rule-file\none() = 1\n"])
         sites = [Site("line $line", joinpath(root, "source.jl"), line) for line in 1:6]
         @test offenders!(Repository(root), "rule", sites) == ["line 2", "line 6"]
-        @test isempty(offenders!(
-            Repository(root),
-            "rule",
-            [Site("whole", joinpath(root, "whole.jl"), 2)],
-        ))
+        @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2)]))
     end
 
     @testset "with a baseline each key is held to its entry, and entries fall" begin
@@ -131,26 +102,16 @@ end
         write(baseline, "[rule]\ncounted = 2\nnoted = \"kept: deliberate\"\n")
         @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0)]))
         @test offenders!(repository, "rule", [sites; Site("counted", "", 0)]) == ["counted"]
-        @test offenders!(repository, "rule", [Site("fresh", "", 0)]; scopes = ("noted",)) ==
-            ["fresh"]
+        @test offenders!(repository, "rule", [Site("fresh", "", 0)]; scopes = ("noted",)) == ["fresh"]
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2)
         @test ratchet!(repository, "rule", [Site("counted", "", 0)]) == String[]
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1)
     end
 
     @testset "repository_sources skips hidden directories, and skipped ones when asked" begin
-        root = write_tree(
-            mktempdir(),
-            [
-                "src/a.jl" => "",
-                "src/vendor/b.jl" => "",
-                "src/.hidden/c.jl" => "",
-                "src/notes.txt" => "",
-            ],
-        )
+        root = write_tree(mktempdir(), ["src/a.jl" => "", "src/vendor/b.jl" => "", "src/.hidden/c.jl" => "", "src/notes.txt" => ""])
         @test relative_sources(Repository(root), root) == ["src/a.jl", "src/vendor/b.jl"]
-        @test relative_sources(Repository(root; skipped_directories = ("vendor",)), root) ==
-            ["src/a.jl"]
+        @test relative_sources(Repository(root; skipped_directories = ("vendor",)), root) == ["src/a.jl"]
         @test present_directories(Repository(root), ("src", "missing")) == ("src",)
     end
 
@@ -164,8 +125,7 @@ end
     end
 
     @testset "abstract-local: a local variable that infers no concrete type" begin
-        @test site_keys(abstract_locals(repository, inferred)) ==
-            ["fixture.jl abstract_local"]
+        @test site_keys(abstract_locals(repository, inferred)) == ["fixture.jl abstract_local"]
         @test isempty(abstract_locals(Repository(mktempdir()), inferred))
     end
 
@@ -175,13 +135,11 @@ end
 
     @testset "closure: closures that capture data, and those holding a Core.Box" begin
         sites = Dict(site.key => site for site in capturing_closures(fixture))
-        @test Set(keys(sites)) ==
-            Set(["fixture.jl adder", "fixture.jl boxed", "fixture.jl lineless"])
+        @test Set(keys(sites)) == Set(["fixture.jl adder", "fixture.jl boxed", "fixture.jl lineless"])
         @test site_keys(boxed_closures(fixture)) == ["fixture.jl boxed"]
         @testset "a closure built without line numbers sits at the function that creates it" begin
             fixture_lines = readlines(joinpath(root, "fixture.jl"))
-            @test sites["fixture.jl lineless"].line ==
-                findfirst(startswith("@eval function lineless"), fixture_lines)
+            @test sites["fixture.jl lineless"].line == findfirst(startswith("@eval function lineless"), fixture_lines)
             @test sites["fixture.jl lineless"].file == joinpath(root, "fixture.jl")
         end
     end
@@ -195,24 +153,19 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(:Holder, struct_locations([path])) ==
-            Site("Holder", path, findfirst(==("struct Holder"), readlines(path)))
+        @test struct_site(:Holder, struct_locations([path])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)))
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
         path = snippet_file("struct-line")
         lines = readlines(path)
         locations = struct_locations([path])
-        @test locations ==
-            Dict(
-                :Documented => (path, findfirst(startswith("struct Documented"), lines)),
-                :Counter => (path, findfirst(endswith("struct Counter"), lines)),
-                :Plain => (path, findfirst(startswith("struct Plain"), lines)),
-                Symbol("Odd Name") => (
-                    path,
-                    findfirst(startswith("struct var\"Odd Name\""), lines),
-                ),
-            )
+        @test locations == Dict(
+            :Documented => (path, findfirst(startswith("struct Documented"), lines)),
+            :Counter => (path, findfirst(endswith("struct Counter"), lines)),
+            :Plain => (path, findfirst(startswith("struct Plain"), lines)),
+            Symbol("Odd Name") => (path, findfirst(startswith("struct var\"Odd Name\""), lines)),
+        )
         sites = [struct_site(name, locations) for name in (:Documented, :Counter)]
         @test offenders!(Repository(dirname(path)), "wide-struct", sites) == ["Counter"]
     end
@@ -223,14 +176,10 @@ end
         @test !isempty(errors)
         @test all(site -> startswith(site.key, "error analysis: broken"), errors)
         dispatches = Site[]
-        @opt_sites "optimization analysis" dispatches target_modules = (
-            fixture,
-        ) fixture.unstable(fixture.make_box())
+        @opt_sites "optimization analysis" dispatches target_modules = (fixture,) fixture.unstable(fixture.make_box())
         @test !isempty(dispatches)
         clean = Site[]
-        @call_sites "error analysis" clean target_modules = (fixture,) fixture.reads_limit(
-            1,
-        )
+        @call_sites "error analysis" clean target_modules = (fixture,) fixture.reads_limit(1)
         @test isempty(clean)
     end
 
@@ -244,8 +193,7 @@ end
     end
 
     @testset "range-guard: floatmin, floatmax, exp's range edge, isfinite of exp" begin
-        @test site_keys(found_in(range_guards, "range-guard")) ==
-            ["guard", "edge", "finite"]
+        @test site_keys(found_in(range_guards, "range-guard")) == ["guard", "edge", "finite"]
     end
 
     @testset "repeated-statement: a statement repeated in one block" begin
@@ -264,21 +212,10 @@ end
     end
 
     @testset "concrete-return: a result annotated with a concrete type, `Matrix{T}` included" begin
-        sites = found_in(
-            (path, located) -> concrete_returns(path, located, Base),
-            "concrete-return",
-        )
+        sites = found_in((path, located) -> concrete_returns(path, located, Base), "concrete-return")
         @test site_keys(sites) == ["source.jl fixed", "source.jl squared"]
         logged = (:error, Regex("Fix: \\Q$CONCRETE_RETURN_FIX\\E"))
-        @test (
-            @test_logs logged offenders!(
-                Repository(mktempdir()),
-                "concrete-return",
-                sites;
-                fix = CONCRETE_RETURN_FIX,
-            )
-        ) ==
-            site_keys(sites)
+        @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin
@@ -294,31 +231,22 @@ end
     end
 
     @testset "annotation: every argument and result annotated" begin
-        @test site_keys(found_in(missing_annotations, "annotation")) ==
-            ["source.jl untyped", "source.jl no_result"]
+        @test site_keys(found_in(missing_annotations, "annotation")) == ["source.jl untyped", "source.jl no_result"]
     end
 
     @testset "one-letter: one-letter variable names, with exemptions opt-in" begin
         path = snippet_file("one-letter")
         @test length(one_letter_sites(Repository(dirname(path)), path)) == 2
-        @test length(one_letter_sites(
-            Repository(dirname(path); one_letter_exempt = (:p,)),
-            path,
-        )) ==
-            1
+        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
     end
 
     @testset "fatou: findings of `fatou lint`" begin
         tree = write_tree(mktempdir(), ["source.jl" => "one() = 1\n"])
-        bin = fake_fatou(
-            mktempdir(),
-            "source.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n",
-        )
+        bin = fake_fatou(mktempdir(), "source.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
         path = ENV["PATH"]
         ENV["PATH"] = "$bin:$path"
         try
-            @test fatou_sites(Repository(tree), (".",)) ==
-                [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3)]
+            @test fatou_sites(Repository(tree), (".",)) == [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3)]
             fake_fatou(bin, "checked 1 file(s): clean\\n")
             @test isempty(fatou_sites(Repository(tree), (".",)))
             fake_fatou(bin, "source.jl: parse error\\n")
@@ -332,21 +260,15 @@ end
 
     @testset "misplaced-import: imports sit in the files that use them" begin
         snippets = SNIPPETS["misplaced-import"]
-        tree = write_tree(
-            mktempdir(),
-            ["main.jl" => snippets["main"], "child.jl" => snippets["child"]],
-        )
-        @test site_keys(misplaced_imports(Repository(tree), (".",))) ==
-            ["main.jl a", "main.jl c", "main.jl D"]
+        tree = write_tree(mktempdir(), ["main.jl" => snippets["main"], "child.jl" => snippets["child"]])
+        @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["main.jl a", "main.jl c", "main.jl D"]
         place_imports!(Repository(tree), (".",))
         @test isempty(misplaced_imports(Repository(tree), (".",)))
         @testset "an import no file uses is deleted, one only an included file uses moves there" begin
-            @test read(joinpath(tree, "main.jl"), String) ==
-                "module Main1\nusing A: b\ninclude(\"child.jl\")\nf() = b\nend\n"
+            @test read(joinpath(tree, "main.jl"), String) == "module Main1\nusing A: b\ninclude(\"child.jl\")\nf() = b\nend\n"
         end
         @testset "a `using M: a, b` list splits across files; a name both files use stays put" begin
-            @test read(joinpath(tree, "child.jl"), String) ==
-                "using A: a\nusing C: c\ng() = a + b + c\n"
+            @test read(joinpath(tree, "child.jl"), String) == "using A: a\nusing C: c\ng() = a + b + c\n"
         end
         @testset "an opted-out import and a bare `using` stay" begin
             kept_tree = write_tree(mktempdir(), ["kept.jl" => snippets["kept"]])
@@ -356,19 +278,10 @@ end
     end
 
     @testset "misplaced-import: a name used only in a command interpolation counts as used" begin
-        tree = write_tree(
-            mktempdir(),
-            [
-                "cmd.jl" =>
-                    "using A: a\nusing B: b\nusing C: c\nf() = `echo \$(a.x()) \$b \\\$c`\n",
-            ],
-        )
+        tree = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nusing B: b\nusing C: c\nf() = `echo \$(a.x()) \$b \\\$c`\n"])
         @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["cmd.jl c"]
         @testset "a `\$` inside single quotes is shell text, not an interpolation" begin
-            quoted = write_tree(
-                mktempdir(),
-                ["cmd.jl" => "using A: a\nf() = `bash -c 'echo \"\$@\" \$a' x`\n"],
-            )
+            quoted = write_tree(mktempdir(), ["cmd.jl" => "using A: a\nf() = `bash -c 'echo \"\$@\" \$a' x`\n"])
             @test site_keys(misplaced_imports(Repository(quoted), (".",))) == ["cmd.jl a"]
         end
     end
@@ -409,10 +322,12 @@ end
 end
 
 @testset "a script without a module keeps the imports its included files use" begin
-    result = placed([
-        "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-        "child.jl" => "g() = a\n",
-    ])
+    result = placed(
+        [
+            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
+            "child.jl" => "g() = a\n",
+        ]
+    )
     @test result["child.jl"] == "using A: a\ng() = a\n"
 end
 
@@ -425,7 +340,12 @@ end
     @testset "a keyword splat needs no annotation, and Bool is an allowed result" begin
         text = "f(x::T; options...)::Bool where {T} = true\n"
         @test isempty(check(text, missing_annotations))
-        @test isempty(check(text, (path, located) -> concrete_returns(path, located, Main)))
+        @test isempty(
+            check(
+                text,
+                (path, located) -> concrete_returns(path, located, Main),
+            )
+        )
     end
     @testset "a positional argument still needs one" begin
         @test length(check("f(x)::Bool = true\n", missing_annotations)) == 1
@@ -435,20 +355,18 @@ end
 @testset "concrete-return: a package struct parameterized by a `where` variable is generic" begin
     scope = Module(:ReturnScope)
     Core.eval(
-        scope,
-        :(
+        scope, :(
             struct Wrapped{E}
                 inner::E
             end
-        ),
+        )
     )
     Core.eval(
-        scope,
-        :(
+        scope, :(
             struct Set{E}
                 inner::E
             end
-        ),
+        )
     )
     check(text::String) = (
         path = tempname() * ".jl";
@@ -457,20 +375,10 @@ end
     )
     @test check("(wrap(element::E)::Wrapped{E}) where {E} = Wrapped(element)\n") == 0
     @test check("(wrap(element::E)::Set{E}) where {E} = Set(element)\n") == 0
-    @test check("(wrap(element::E)::Wrapped{E}) where {E <: Real} = Wrapped(element)\n") ==
-        0
-    @test check(
-        "function wrap(element::E)::Wrapped{E} where {E}\n    return Wrapped(element)\nend\n",
-    ) ==
-        0
-    @test check(
-        "(wrap(elements::AbstractVector{E})::Wrapped{Vector{E}}) where {E} = Wrapped(collect(elements))\n",
-    ) ==
-        0
-    @test check(
-        "(wrap(element::E)::Union{Nothing, Wrapped{E}}) where {E} = Wrapped(element)\n",
-    ) ==
-        0
+    @test check("(wrap(element::E)::Wrapped{E}) where {E <: Real} = Wrapped(element)\n") == 0
+    @test check("function wrap(element::E)::Wrapped{E} where {E}\n    return Wrapped(element)\nend\n") == 0
+    @test check("(wrap(elements::AbstractVector{E})::Wrapped{Vector{E}}) where {E} = Wrapped(collect(elements))\n") == 0
+    @test check("(wrap(element::E)::Union{Nothing, Wrapped{E}}) where {E} = Wrapped(element)\n") == 0
     @test check("wrap(element::Float32)::Wrapped{Float32} = Wrapped(element)\n") == 1
     @test check("wrap(element::Float32)::Wrapped = Wrapped(element)\n") == 1
     @test check("(wrap(element::Float32)::Wrapped{E}) where {T} = Wrapped(element)\n") == 1
@@ -478,61 +386,39 @@ end
 end
 
 @testset "a name used only inside a macro call counts as used" begin
-    result = placed([
-        "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-        "child.jl" => "@testset \"x\" begin\n    @test f(a(2))\nend\n",
-    ])
+    result = placed(
+        [
+            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
+            "child.jl" => "@testset \"x\" begin\n    @test f(a(2))\nend\n",
+        ]
+    )
     @test result["child.jl"] == "using A: a\n@testset \"x\" begin\n    @test f(a(2))\nend\n"
 end
 
 @testset "import placement reads every include form and import shape" begin
     @testset "a moved import joins the imports the target file already has, at their indent" begin
-        result = placed([
-            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-            "child.jl" => "using C: c\ng() = a + c\n",
-        ])
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "using C: c\ng() = a + c\n"])
         @test result["child.jl"] == "using C: c\nusing A: a\ng() = a + c\n"
-        result = placed([
-            "main.jl" => "module M\n    using A: a\n    include(\"child.jl\")\nend\n",
-            "child.jl" => "    using C: c\n    g() = a + c\n",
-        ])
+        result = placed(["main.jl" => "module M\n    using A: a\n    include(\"child.jl\")\nend\n", "child.jl" => "    using C: c\n    g() = a + c\n"])
         @test result["child.jl"] == "    using C: c\n    using A: a\n    g() = a + c\n"
     end
     @testset "an import has nowhere to go in a module without imports" begin
-        @test_throws ErrorException placed([
-            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-            "child.jl" => "module Inner\ng() = a\nend\n",
-        ])
+        @test_throws ErrorException placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "module Inner\ng() = a\nend\n"])
     end
     @testset "an unused import sharing its line with code is cut out of the line" begin
-        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] ==
-            "module M; ; f() = 1; end\n"
+        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; ; f() = 1; end\n"
     end
     @testset "aliases, macros and string macros are names" begin
-        @test placed([
-            "main.jl" => "using A: a as b, @m\nf() = b\ng() = raw\"x\"\n",
-        ])["main.jl"] ==
-            "using A: a as b\nf() = b\ng() = raw\"x\"\n"
+        @test placed(["main.jl" => "using A: a as b, @m\nf() = b\ng() = raw\"x\"\n"])["main.jl"] == "using A: a as b\nf() = b\ng() = raw\"x\"\n"
     end
     @testset "include paths: joinpath with @__DIR__ is followed, anything else blocks the move" begin
-        files = [
-            "main.jl" => "using A: a\ninclude(joinpath(@__DIR__, \"child.jl\"))\n",
-            "child.jl" => "g() = a\n",
-        ]
+        files = ["main.jl" => "using A: a\ninclude(joinpath(@__DIR__, \"child.jl\"))\n", "child.jl" => "g() = a\n"]
         @test placed(files)["child.jl"] == "using A: a\ng() = a\n"
-        for blocked in (
-                "include(\"gone.jl\")",
-                "include(name)",
-                "include(string(\"child.jl\"))",
-                "include(\"child.jl\", 1)",
-            )
+        for blocked in ("include(\"gone.jl\")", "include(name)", "include(string(\"child.jl\"))", "include(\"child.jl\", 1)")
             kept = "using A: a\n$blocked\n"
             @test placed(["main.jl" => kept, "child.jl" => "g() = a\n"])["main.jl"] == kept
         end
-        cyclic = placed([
-            "main.jl" => "using A: a\ninclude(\"child.jl\")\n",
-            "child.jl" => "include(\"child.jl\")\ng() = a\n",
-        ])
+        cyclic = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "include(\"child.jl\")\ng() = a\n"])
         @test cyclic["main.jl"] == "include(\"child.jl\")\n"
     end
 end
@@ -560,15 +446,7 @@ end
         @test !Corset.is_hidden_input(GlobalRef(Main, :no_such_binding_anywhere))
     end
     @testset "abstract local types: unions, containers, tuples and Type" begin
-        concrete = (
-            Union{},
-            Union{Int, String},
-            Type{Int},
-            Vector{Int},
-            Dict{String, Int},
-            Tuple{Int, Float64},
-            Tuple{Vararg{Int}},
-        )
+        concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})
         @test !any(Corset.abstract_local_type, concrete)
         @test Corset.abstract_local_type(Union{Int, Float64, String, Char, Symbol})
         for element in (Any, Number)
@@ -596,8 +474,7 @@ end
         @test Corset.definition_line(Expr(:call, :f), 7) == 7
     end
     @testset "a testset names the code inside it" begin
-        @test Corset.testset_name(Meta.parse("@testset \"a b\" begin end")) ===
-            Symbol("a b")
+        @test Corset.testset_name(Meta.parse("@testset \"a b\" begin end")) === Symbol("a b")
         @test isnothing(Corset.testset_name(Meta.parse("@testset begin end")))
         path = tempname() * ".jl"
         write(path, "@testset \"inside\" begin\n    f(a) = 1\nend\n")
@@ -611,8 +488,7 @@ end
     @testset "annotated arguments: keyword, keyword-section and splat forms" begin
         @test Corset.annotated_arguments(Expr(:kw, :(x::Int), 1)) == [(:x, :Int)]
         @test Corset.annotated_arguments(Expr(:parameters, :(k::Int))) == [(:k, :Int)]
-        @test Corset.annotated_arguments(Expr(:parameters, Expr(:kw, :(k::Int), 1))) ==
-            [(:k, :Int)]
+        @test Corset.annotated_arguments(Expr(:parameters, Expr(:kw, :(k::Int), 1))) == [(:k, :Int)]
         @test Corset.annotated_arguments(Expr(:..., :(rest::Int))) == [(:rest, :Int)]
         @test isempty(Corset.annotated_arguments(Expr(:parameters, :plain)))
     end
@@ -642,17 +518,13 @@ end
     defined = Corset.defined_methods(closure_chain)
     namers = Corset.closure_namers(closure_chain, defined)
     @testset "a nested closure is defined by the function that holds the outermost one" begin
-        @test Set(Corset.closure_definer(name, namers).name for name in keys(namers)) ==
-            Set([:nested, :recursive, :twice])
+        @test Set(Corset.closure_definer(name, namers).name for name in keys(namers)) == Set([:nested, :recursive, :twice])
         @test length(Corset.live_closures(closure_chain, defined)) == length(namers)
     end
     @testset "code from a macro sits at the method's line, and a bare argument slot too" begin
         method = only(methods(closure_chain.uses_macro))
         code = Corset.lowered(method)
-        @test any(
-            index -> Corset.statement_line(code, method, index) == method.line,
-            eachindex(code.code),
-        )
+        @test any(index -> Corset.statement_line(code, method, index) == method.line, eachindex(code.code))
         @test Corset.slot_line(Corset.Inferred(method, code, false), 2) == method.line
     end
     @testset "a builtin has no lowered code and returns no argument's call" begin
@@ -740,10 +612,7 @@ end
         @test count(contains("each_part"), keys) == 1
     end
     @testset "a method returning a call to its argument gets no verdict from what its callers passed" begin
-        @test !any(
-            contains("passing"),
-            [site.key for site in unmarked_effects(repository, inferred)],
-        )
+        @test !any(contains("passing"), [site.key for site in unmarked_effects(repository, inferred)])
     end
     @testset "inferred_methods depends on its signatures alone, not on what ran before" begin
         signatures = Type[Tuple{typeof(Probe.generic), Vector{Float32}}]
@@ -864,6 +733,13 @@ include("cli.jl")
     # The annotation of a typed assignment is a use, not a definition.
     annotated = write_scan("@testset \"f\" begin\n x::GoneType = 1\n @test x == 1\nend\n")
     @test first(undefined_names(annotated; scope = @__MODULE__)) == ["line 1: `GoneType`"]
+    # A qualified `Test.@testset` is scanned; a dotted import binds its last name.
+    qualified = write_scan("Test.@testset \"f\" begin\n gone_name == 1\nend\n")
+    @test first(undefined_names(qualified; scope = @__MODULE__)) == ["line 1: `gone_name`"]
+    dotted = write_scan(
+        "import Base.FastMath\nusing Base.Iterators\n@testset \"f\" begin\n @test FastMath isa Module\n @test Iterators isa Module\n @test take isa Function\nend\n",
+    )
+    @test first(undefined_names(dotted; scope = @__MODULE__)) == String[]
     loop = write_tree(
         mktempdir(),
         [

@@ -23,14 +23,12 @@ function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes ar
                     push!(names, last(imported.args))
                 end
             end
-        elseif clause.head === :. &&
-                length(clause.args) == 1 &&
-                first(clause.args) isa Symbol
-            module_name = first(clause.args)
-            push!(names, module_name)
+        elseif clause.head === :. && !isempty(clause.args) && all(part -> part isa Symbol, clause.args)
+            push!(names, last(clause.args))
+            root = first(clause.args)
             loaded = try
-                Core.eval(Main, :(import $module_name))
-                getfield(Main, module_name)
+                Core.eval(Main, :(import $root))
+                reduce(getfield, clause.args[(begin + 1):end]; init = getfield(Main, root))
             catch
                 nothing
             end
@@ -247,6 +245,16 @@ function module_globals!( # lint: abstract-local  walks Julia ASTs, whose nodes 
     return names
 end
 
+"""Whether `name` is `@testset` or a qualified spelling of it such as `Test.@testset`."""
+function is_testset_macro( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+        name,
+    )::Bool
+    if name isa Expr && name.head === :. && last(name.args) isa QuoteNode
+        name = last(name.args).value
+    end
+    return name === Symbol("@testset")
+end
+
 """The `(line, node)` of every `@testset` under `node`, wherever a block, `let` or wrapper macro puts it; a testset's own body is not searched."""
 function testset_nodes( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
         node,
@@ -256,7 +264,7 @@ function testset_nodes( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     if !(node isa Expr)
         return found
     end
-    if node.head === :macrocall && first(node.args) === Symbol("@testset")
+    if node.head === :macrocall && is_testset_macro(first(node.args))
         return [(line, node)]
     end
     for child in node.args
