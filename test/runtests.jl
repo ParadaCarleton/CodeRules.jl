@@ -46,6 +46,9 @@ function load_fixture(root::AbstractString)::Module
     return fixture
 end
 
+"""The signatures of the methods of `mod` whose argument types are all concrete: a fixed workload that needs no call."""
+concrete_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in Corset.module_methods(mod) if Base.isdispatchtuple(method.sig)]
+
 """The files `repository_sources` finds under `src` of `repository`, relative to `root`."""
 relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [relpath(file, root) for file in repository_sources(repository, ("src",))]
 
@@ -115,7 +118,7 @@ end
     root = mktempdir()
     fixture = load_fixture(root)
     repository = Repository(root)
-    inferred = inferred_methods(fixture)
+    inferred = inferred_methods(fixture, concrete_signatures(fixture))
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
         @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
@@ -564,6 +567,7 @@ module Probe
         positions = findall(==("x"), texts)
         return length(positions)
     end
+    idle()::Nothing = nothing
     function passing(thunk::F) where {F}
         try
             return thunk()
@@ -573,20 +577,22 @@ module Probe
     end
 end
 
-@testset "abstract locals and bang names read what ran" begin
-    Probe.generic(Float32[1, 2])
-    Probe.off(nothing)
-    Probe.off(1.0f0)
-    Probe.catches()
-    Probe.__init__()
-    Probe.each_part(identity, 2)
-    Probe.each_part(string, 2)
-    Probe.passing(() -> nothing)
-    Probe.matches(["x", "y"])
-    Probe.Buffer(Float32[1, 2], 1)
+@testset "abstract locals and bang names read the signatures given" begin
+    signatures = Type[
+        Tuple{typeof(Probe.generic), Vector{Float32}},
+        Tuple{typeof(Probe.off), Nothing},
+        Tuple{typeof(Probe.off), Float32},
+        Tuple{typeof(Probe.catches)},
+        Tuple{typeof(Probe.__init__)},
+        Tuple{typeof(Probe.each_part), typeof(identity), Int},
+        Tuple{typeof(Probe.each_part), typeof(string), Int},
+        Tuple{typeof(Probe.passing), typeof(Probe.idle)},
+        Tuple{typeof(Probe.matches), Vector{String}},
+        Tuple{Type{Probe.Buffer}, Vector{Float32}, Int},
+    ]
     repository = Repository(@__DIR__)
-    inferred = inferred_methods(Probe)
-    @testset "a generic method or constructor is typed at the types it was called with, and a catch variable is skipped" begin
+    inferred = inferred_methods(Probe, signatures)
+    @testset "a generic method or constructor is typed at the signatures given, and a catch variable is skipped" begin
         @test isempty(abstract_locals(repository, inferred))
     end
     @testset "a nothing method beside a valued one is not a procedure; a lone one is" begin
@@ -601,6 +607,16 @@ end
     end
     @testset "a method returning a call to its argument gets no verdict from what its callers passed" begin
         @test !any(contains("passing"), [site.key for site in unmarked_effects(repository, inferred)])
+    end
+    @testset "inferred_methods depends on its signatures alone, not on what ran before" begin
+        signatures = Type[Tuple{typeof(Probe.generic), Vector{Float32}}]
+        cold = inferred_methods(Probe, signatures)
+        Probe.generic(Float64[1, 2])
+        Probe.generic(Int32[1, 2])
+        warm = inferred_methods(Probe, signatures)
+        @test [item.method for item in cold] == [item.method for item in warm]
+        @test [item.method.name for item in warm] == [:generic]
+        @test [item.code.slottypes for item in cold] == [item.code.slottypes for item in warm]
     end
 end
 

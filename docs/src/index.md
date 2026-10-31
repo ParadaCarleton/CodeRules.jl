@@ -63,7 +63,7 @@ offenders!(repo, "hidden-input", hidden_inputs(Demo))
 ```
 
 ```@example first
-offenders!(repo, "abstract-local", abstract_locals(repo, inferred_methods(Demo)))
+offenders!(repo, "abstract-local", abstract_locals(repo, inferred_methods(Demo, [Tuple{typeof(Demo.total), Vector{Int}}])))
 ```
 
 Each returned string is a key: the name of one offender. [`offenders!`](@ref) returns the keys
@@ -80,7 +80,7 @@ const REPO = Repository(pkgdir(MyPackage))
 
 @testset "code rules" begin
     ratchet!(REPO, "hidden-input", hidden_inputs(MyPackage))
-    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage)))
+    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
 end
 ```
 

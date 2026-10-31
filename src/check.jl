@@ -56,6 +56,13 @@ function judge(
     ]
 end
 
+"""Whether `rule` reads the types inference gives `signatures` (`inferred_methods`)."""
+reads_signatures(rule::Rule)::Bool = rule isa AbstractLocalRule || rule isa BangRule
+
+"""Whether `rule` has what it reads: the loaded package `mod` for a module rule, `signatures` for a rule that reads inferred types."""
+can_run(rule::Rule, mod::Union{Module, Nothing}, signatures::Union{AbstractVector{<:Type}, Nothing})::Bool =
+    (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || !isnothing(signatures))
+
 """The names of the rules in `rules` that read the loaded package."""
 module_rule_names(rules::Tuple)::Vector{String} = [
     rule_name(rule)
@@ -125,10 +132,11 @@ function fix_diff(config::Config, root::AbstractString)::String
 end
 
 """
-    run_rules(config, root; mod = nothing, fix = false, update_baseline = false)
+    run_rules(config, root; mod = nothing, signatures = nothing, fix = false, update_baseline = false)
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
-skipped because they read the loaded package `mod` and none was given. `fix` first rewrites the files
+skipped because they read the loaded package `mod` and none was given. `abstract-local` and `bang` also
+need `signatures`, the fixed workload `inferred_methods` types `mod` over; without them they are skipped. `fix` first rewrites the files
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read.
 """
@@ -136,21 +144,21 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         config::Config,
         root::AbstractString;
         mod::Union{Module, Nothing} = nothing,
+        signatures::Union{AbstractVector{<:Type}, Nothing} = nothing,
         fix::Bool = false,
         update_baseline::Bool = false,
     )::Tuple{Vector{Finding}, Vector{String}}
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
     enabled = enabled_rules(config)
-    runnable = Tuple(rule for rule in enabled if !(rule isa ModuleRule) || !isnothing(mod))
+    runnable = Tuple(rule for rule in enabled if can_run(rule, mod, signatures))
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
         apply_fixes!(runnable, Context(repository_, directories, mod, Inferred[]))
     end
-    needs_inferred = any(rule -> rule isa AbstractLocalRule || rule isa BangRule, runnable)
     inferred = Inferred[]
-    if needs_inferred
-        inferred = inferred_methods(mod)
+    if any(reads_signatures, runnable)
+        inferred = inferred_methods(mod, signatures)
     end
     context = Context(repository_, directories, mod, inferred)
     sites = Dict{String, Vector{Site}}(rule_name(rule) => Site[] for rule in runnable)

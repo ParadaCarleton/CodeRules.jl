@@ -184,6 +184,7 @@ end
             with_overrides(load_config(root), false, ["hidden-input" => :deny]),
             root;
             mod = Corset.WorkloadPackage,
+            signatures = concrete_signatures(Corset.WorkloadPackage),
         )
         @test ("hidden-input", :deny) in
             [(finding.rule, finding.level) for finding in findings]
@@ -260,7 +261,7 @@ end
     path = ENV["PATH"]
     ENV["PATH"] = "$bin:$path"
     try
-        findings, skipped = run_rules(config, root; mod = fixture)
+        findings, skipped = run_rules(config, root; mod = fixture, signatures = concrete_signatures(fixture))
         @test isempty(skipped)
         pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]
         @test setdiff(pedantic, Set(finding.rule for finding in findings)) == String[]

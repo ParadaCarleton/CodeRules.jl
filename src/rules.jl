@@ -246,37 +246,19 @@ struct Inferred
 end
 
 """
-The concrete signatures `method` was compiled for: its specializations, which the code that ran
-(the test suite) called with real argument types. A constructor's signature holds `Type{X}`, which is not
-concrete but is a dispatch type, so `isdispatchtuple` keeps it. A method with no type variable is typed over its own
-signature; so is an abstract one nothing has called, since its argument types stay abstract.
+Each method of `mod` (`module_methods`) that inference reaches from `signatures`, typed over each signature
+that selects it. The result depends on `signatures` alone. Inference returns a method and its declared type,
+with no code, for one it cannot type (a generated method); that has no locals to report and is left out.
 """
-function typed_signatures(method::Method)::Vector{Type}
-    called = Type[
-        instance.specTypes
-            for instance in Base.specializations(method)
-            if instance isa Core.MethodInstance && Base.isdispatchtuple(instance.specTypes)
-    ]
-    if !Base.isdispatchtuple(method.sig) && !isempty(called)
-        return called
-    end
-    return Type[method.sig]
-end
-
-"""
-Each method of `mod` (`module_methods`), typed over each of its `typed_signatures`. Inference returns a
-method and its declared type, with no code, for one it cannot type (a generated method); that has no
-locals to report and is left out.
-"""
-function inferred_methods(mod::Module)::Vector{Inferred}
+function inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferred}
+    methods = Set{Method}(module_methods(mod))
     return [
-        Inferred(method, code, Core.Compiler.widenconst(result) === Nothing)
-            for method in module_methods(mod)
-            for signature in typed_signatures(method)
+        Inferred(code.parent.def, code, Core.Compiler.widenconst(result) === Nothing)
+            for signature in unique(signatures)
             for (code, result) in Base.code_typed_by_type(signature; optimize = false)
             if code isa Core.CodeInfo &&
             code.parent isa Core.MethodInstance &&
-            code.parent.def === method
+            code.parent.def in methods
     ]
 end
 
