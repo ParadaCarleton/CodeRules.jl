@@ -23,9 +23,12 @@ const REPO = Repository(pkgdir(MyPackage); baseline = joinpath(@__DIR__, "code_b
 
 @testset "code rules" begin
     ratchet!(REPO, "hidden-input", hidden_inputs(MyPackage))
-    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage)))
+    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
 end
 ```
+
+`SIGNATURES` is the fixed list of method signatures the rules type the package over (for example
+`Tuple{typeof(solve), Float32}`), so the result does not change with test order.
 
 The baseline file allows today's offenders, fails on new ones and lowers itself as old ones are fixed.
 The [documentation](https://paradacarleton.github.io/Corset.jl/dev/) has the guide (baselines,

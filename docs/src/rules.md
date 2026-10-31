@@ -8,9 +8,9 @@ source files.
 
 ## Rules on a loaded module
 
-These see inferred types, bindings and closures. They need `using MyPackage` and a workload that
-compiles the methods (`inferred_methods(MyPackage)` infers the methods that precompilation
-specialized).
+These see inferred types, bindings and closures. They need `using MyPackage`. The rules that read
+inferred types take their signatures from the caller: `inferred_methods(MyPackage, signatures)` infers the
+methods those signatures reach, so the result is the same on every run. The `corset` command line has no signatures, so it skips these two rules.
 
 ### `hidden-input`: `hidden_inputs(mod)`
 
@@ -19,7 +19,7 @@ depends on state its signature does not show.
 
 Repair: pass the value as an argument, or return it from the function that computes it.
 
-### `abstract-local`: `abstract_locals(repo, inferred_methods(mod))`
+### `abstract-local`: `abstract_locals(repo, inferred_methods(mod, signatures))`
 
 Local variables whose inferred type is abstract or a union, one site per variable however many
 specializations ran. The usual causes are an accumulator that starts as `0` and receives floats, and
@@ -27,7 +27,7 @@ a variable assigned from a container of abstract type.
 
 Repair: initialize with the right type (`zero(eltype(xs))`) or annotate the local.
 
-### `bang`: `unmarked_effects(repo, inferred_methods(mod))`
+### `bang`: `unmarked_effects(repo, inferred_methods(mod, signatures))`
 
 Functions that always return `nothing` and have no `!` in the name. A function with a `nothing`
 method beside methods that return values (a dispatch on "off") is not reported.

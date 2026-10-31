@@ -300,7 +300,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     findings, skipped = run_rules(config, root; mod, fix = options.fix, update_baseline = options.update_baseline)
     print_findings(out, root, findings, options.format)
     if !isempty(skipped)
-        println(err, "skipped (they read the loaded package): ", join(skipped, ", "))
+        println(err, "skipped (they read the loaded package or need signatures): ", join(skipped, ", "))
     end
     return exit_code(findings, options.deny_warnings)
 end
