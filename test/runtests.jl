@@ -572,7 +572,8 @@ module Probe
     struct Wrapped{M}
         marker::M
     end
-    @noinline inner(point::Marker)::Int = 1
+    # A constant body would be folded into `outer` unless coverage is on, leaving no `:invoke` edge.
+    @noinline inner(point::Marker)::Int = Int(time_ns() % 1) + 1
     outer(point::Marker)::Int = inner(point) + 1
     function passing(thunk::F) where {F}
         try
