@@ -59,4 +59,4 @@ jobs:
           version: "1"
       - uses: fredrikekre/runic-action@v1
         with:
-          version: "1"
+          version: "1.13.0"
